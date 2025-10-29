@@ -47,20 +47,6 @@ export interface StreamOutput {
 	messages: StreamChunk[];
 }
 
-// From @n8n/chat
-export type ChunkType = 'begin' | 'item' | 'end' | 'error';
-export interface StructuredChunk {
-	type: ChunkType;
-	content?: string;
-	metadata: {
-		nodeId: string;
-		nodeName: string;
-		timestamp: number;
-		runIndex: number;
-		itemIndex: number;
-	};
-}
-
 export interface NodeStreamingState {
 	nodeId: string;
 	chunks: string[];
@@ -75,4 +61,10 @@ export type CredentialsMap = z.infer<typeof credentialsMapSchema>;
 export interface GroupedConversations {
 	group: string;
 	sessions: ChatHubSessionDto[];
+}
+
+export interface ChatAgentFilter {
+	sortBy: 'updatedAt' | 'createdAt';
+	provider: 'custom-agent' | 'n8n' | '';
+	search: string;
 }
