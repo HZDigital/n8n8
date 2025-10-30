@@ -17,6 +17,7 @@ import {
 	type AccountInfo,
 	CryptoProvider,
 } from '@azure/msal-node';
+import { PROJECT_OWNER_ROLE_SLUG } from '@n8n/permissions';
 
 import { AuthError } from '@/errors/response-errors/auth.error';
 import { InternalServerError } from '@/errors/response-errors/internal-server.error';
@@ -385,12 +386,63 @@ export class AzureAdService {
 			throw new AuthError('User does not exist and auto-creation is disabled');
 		}
 
-		// Check if there's already an owner - if not, make this user the owner
-		const ownerCount = await this.userRepository.count({
+		const existingOwner = await this.userRepository.findOne({
 			where: { role: { slug: 'global:owner' } },
+			relations: ['role', 'projectRelations', 'projectRelations.role', 'projectRelations.project'],
 		});
 
-		const isFirstUser = ownerCount === 0;
+		const instanceNeedsSetup = !config.getEnv('userManagement.isInstanceOwnerSetUp');
+		const ownerShellNeedsClaim =
+			instanceNeedsSetup &&
+			existingOwner &&
+			(!existingOwner.email || existingOwner.email.trim() === '');
+		const isFirstUser = ownerShellNeedsClaim || !existingOwner;
+
+		if (instanceNeedsSetup && existingOwner?.email && !ownerShellNeedsClaim) {
+			await this.settingsRepository.save({
+				key: 'userManagement.isInstanceOwnerSetUp',
+				value: JSON.stringify(true),
+				loadOnStartup: true,
+			});
+			config.set('userManagement.isInstanceOwnerSetUp', true);
+		}
+
+		if (ownerShellNeedsClaim && existingOwner) {
+			const existingRelations = existingOwner.projectRelations ?? [];
+
+			existingOwner.email = profile.email.toLowerCase();
+			existingOwner.firstName = profile.firstName;
+			existingOwner.lastName = profile.lastName;
+
+			const updatedOwner = await this.userRepository.save(existingOwner);
+
+			const personalRelation = existingRelations.find(
+				(relation) => relation.role?.slug === PROJECT_OWNER_ROLE_SLUG,
+			);
+
+			if (personalRelation?.project) {
+				personalRelation.project.name = updatedOwner.createPersonalProjectName();
+				await this.userRepository.manager.save(personalRelation.project);
+			}
+
+			await this.authIdentityRepository.insert({
+				providerId: profile.id,
+				providerType: 'azuread',
+				userId: updatedOwner.id,
+			});
+
+			await this.settingsRepository.save({
+				key: 'userManagement.isInstanceOwnerSetUp',
+				value: JSON.stringify(true),
+				loadOnStartup: true,
+			});
+
+			config.set('userManagement.isInstanceOwnerSetUp', true);
+			this.logger.info('Instance owner setup completed via Azure AD');
+
+			return updatedOwner;
+		}
+
 		const roleSlug = isFirstUser
 			? 'global:owner'
 			: this.config.defaultRole === 'member'
