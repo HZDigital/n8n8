@@ -208,6 +208,7 @@ export class AzureAdController {
 		return {
 			enabled: this.azureAdService.isEnabled(),
 			loginLabel: this.azureAdService.getLoginLabel(),
+			forceAuthentication: this.azureAdService.isForceAuthenticationEnabled(),
 		};
 	}
 
@@ -252,5 +253,4 @@ export class AzureAdController {
 			this.logger.debug(`Cleaned up ${expiredStates.length} expired state tokens`);
 		}
 	}
-
 }

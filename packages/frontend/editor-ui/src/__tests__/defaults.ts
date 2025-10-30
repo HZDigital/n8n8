@@ -85,6 +85,14 @@ export const defaultSettings: FrontendSettings = {
 		ldap: { loginEnabled: false, loginLabel: '' },
 		saml: { loginEnabled: false, loginLabel: '' },
 		oidc: { loginEnabled: false, loginUrl: '', callbackUrl: '' },
+		hideGenericSsoLoginButton: false,
+		azureAd: {
+			loginEnabled: false,
+			loginUrl: '',
+			loginLabel: 'Sign in with Microsoft',
+			ssoLoginUrl: '',
+			forceAuthentication: false,
+		},
 	},
 	telemetry: {
 		enabled: false,

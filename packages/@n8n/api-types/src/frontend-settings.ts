@@ -137,9 +137,13 @@ export interface FrontendSettings {
 			loginLabel: string;
 			loginEnabled: boolean;
 		};
+		hideGenericSsoLoginButton: boolean;
 		azureAd: {
 			loginEnabled: boolean;
 			loginUrl: string;
+			loginLabel: string;
+			ssoLoginUrl: string;
+			forceAuthentication: boolean;
 		};
 	};
 	publicApi: {

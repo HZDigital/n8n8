@@ -22,15 +22,21 @@ export const useSSOStore = defineStore('sso', () => {
 	const authenticationMethod = ref<UserManagementAuthenticationMethod | undefined>(undefined);
 	const selectedAuthProtocol = ref<SupportedProtocolType | undefined>(undefined);
 
-	const showSsoLoginButton = computed(
+	const hideGenericSsoLoginButton = ref(false);
+
+	const showGenericSsoLoginButton = computed(
 		() =>
-			(isSamlLoginEnabled.value &&
+			!hideGenericSsoLoginButton.value &&
+			((isSamlLoginEnabled.value &&
 				isEnterpriseSamlEnabled.value &&
 				isDefaultAuthenticationSaml.value) ||
-			(isOidcLoginEnabled.value &&
-				isEnterpriseOidcEnabled.value &&
-				isDefaultAuthenticationOidc.value) ||
-			azureAd.value.loginEnabled,
+				(isOidcLoginEnabled.value &&
+					isEnterpriseOidcEnabled.value &&
+					isDefaultAuthenticationOidc.value)),
+	);
+
+	const showSsoLoginButton = computed(
+		() => showGenericSsoLoginButton.value || azureAd.value.loginEnabled,
 	);
 
 	const getSSORedirectUrl = async (existingRedirect?: string) =>
@@ -48,7 +54,11 @@ export const useSSOStore = defineStore('sso', () => {
 			azureAd?: {
 				loginEnabled: boolean;
 				loginLabel: string;
+				forceAuthentication: boolean;
+				loginUrl: string;
+				ssoLoginUrl: string;
 			};
+			hideGenericSsoLoginButton?: boolean;
 		};
 		features: {
 			saml: boolean;
@@ -78,9 +88,14 @@ export const useSSOStore = defineStore('sso', () => {
 			oidc.value.callbackUrl = options.config.oidc.callbackUrl || '';
 		}
 
+		hideGenericSsoLoginButton.value = options.config.hideGenericSsoLoginButton ?? false;
+
 		if (options.config.azureAd) {
 			azureAd.value.loginEnabled = options.config.azureAd.loginEnabled;
 			azureAd.value.loginLabel = options.config.azureAd.loginLabel;
+			azureAd.value.forceAuthentication = options.config.azureAd.forceAuthentication;
+			azureAd.value.loginUrl = options.config.azureAd.loginUrl;
+			azureAd.value.ssoLoginUrl = options.config.azureAd.ssoLoginUrl;
 		}
 	};
 
@@ -214,18 +229,40 @@ export const useSSOStore = defineStore('sso', () => {
 	const azureAd = ref<{
 		loginEnabled: boolean;
 		loginLabel: string;
+		forceAuthentication: boolean;
+		loginUrl?: string;
+		ssoLoginUrl?: string;
 	}>({
 		loginEnabled: false,
 		loginLabel: 'Sign in with Microsoft',
+		forceAuthentication: false,
 	});
 
 	const isAzureAdLoginEnabled = computed(() => azureAd.value.loginEnabled);
 
 	const azureAdLoginLabel = computed(() => azureAd.value.loginLabel);
 
+	const isAzureAdForceAuthenticationEnabled = computed(() => azureAd.value.forceAuthentication);
+
 	const getAzureAdLoginUrl = (redirect?: string) => {
-		const redirectParam = redirect ? `?redirect=${encodeURIComponent(redirect)}` : '';
-		return `${rootStore.restApiContext.baseUrl}/azure-ad/login${redirectParam}`;
+		const base = azureAd.value.loginUrl ?? `${rootStore.restApiContext.baseUrl}/azure-ad/login`;
+		if (!redirect) {
+			return base;
+		}
+
+		const url = new URL(base, window.location.origin);
+		url.searchParams.set('redirect', redirect);
+
+		return url.toString();
+	};
+
+	const getAzureAdSsoLoginUrl = (token: string) => {
+		const base =
+			azureAd.value.ssoLoginUrl ?? `${rootStore.restApiContext.baseUrl}/azure-ad/sso-login`;
+		const url = new URL(base, window.location.origin);
+		url.searchParams.set('token', token);
+
+		return url.toString();
 	};
 
 	const initializeSelectedProtocol = () => {
@@ -274,6 +311,10 @@ export const useSSOStore = defineStore('sso', () => {
 		azureAd,
 		isAzureAdLoginEnabled,
 		azureAdLoginLabel,
+		isAzureAdForceAuthenticationEnabled,
 		getAzureAdLoginUrl,
+		getAzureAdSsoLoginUrl,
+		showGenericSsoLoginButton,
+		hideGenericSsoLoginButton,
 	};
 });

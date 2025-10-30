@@ -25,7 +25,37 @@ const route = useRoute();
 
 const loading = ref(false);
 
-// Redirect to Azure AD login for owner setup (only if not already authenticated)
+const getAzureAdTokenFromQuery = () => {
+	const candidateKeys = ['azureToken', 'azureAdToken', 'azure_token', 'azureadToken'] as const;
+	for (const key of candidateKeys) {
+		const value = route.query?.[key];
+		if (typeof value === 'string' && value.trim()) {
+			return value;
+		}
+	}
+
+	if (typeof route.query?.token === 'string') {
+		const provider = route.query.provider;
+		if (
+			typeof provider === 'string' &&
+			['azure', 'azuread', 'azure-ad', 'microsoft'].includes(provider.toLowerCase())
+		) {
+			return route.query.token;
+		}
+		const isAzureFlag =
+			route.query.azure === '1' ||
+			route.query.azure === 'true' ||
+			route.query.azureAd === '1' ||
+			route.query.azureAd === 'true';
+		if (isAzureFlag) {
+			return route.query.token;
+		}
+	}
+
+	return undefined;
+};
+
+// Redirect to Azure AD login for owner setup when enforced or an Azure token is supplied
 onMounted(async () => {
 	// Check if user is already authenticated
 	if (usersStore.currentUserId) {
@@ -34,7 +64,16 @@ onMounted(async () => {
 		return;
 	}
 
-	if (ssoStore.isAzureAdLoginEnabled) {
+	if (!ssoStore.isAzureAdLoginEnabled) return;
+
+	const azureToken = getAzureAdTokenFromQuery();
+	if (azureToken) {
+		const ssoLoginUrl = ssoStore.getAzureAdSsoLoginUrl(azureToken);
+		window.location.href = ssoLoginUrl;
+		return;
+	}
+
+	if (ssoStore.isAzureAdForceAuthenticationEnabled) {
 		toast.showMessage({
 			title: locale.baseText('auth.setup.azureAdRedirect.title'),
 			message: locale.baseText('auth.setup.azureAdRedirect.message'),
@@ -131,6 +170,7 @@ const onSubmit = async (values: { [key: string]: string | boolean }) => {
 	<AuthView
 		:form="formConfig"
 		:form-loading="loading"
+		:with-sso="true"
 		data-test-id="setup-form"
 		@submit="onSubmit"
 	/>

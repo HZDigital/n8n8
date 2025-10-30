@@ -542,6 +542,13 @@ export class AzureAdService {
 	}
 
 	/**
+	 * Returns whether Azure AD must be enforced as the only auth method
+	 */
+	isForceAuthenticationEnabled(): boolean {
+		return this.config.forceAuthentication;
+	}
+
+	/**
 	 * Validate Azure AD configuration
 	 */
 	validateConfig(): { valid: boolean; errors: string[] } {

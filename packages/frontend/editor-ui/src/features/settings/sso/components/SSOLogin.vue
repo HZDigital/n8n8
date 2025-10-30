@@ -31,15 +31,12 @@ const onAzureAdLogin = () => {
 </script>
 
 <template>
-	<div
-		v-if="ssoStore.showSsoLoginButton || ssoStore.isAzureAdLoginEnabled"
-		:class="$style.ssoLogin"
-	>
+	<div v-if="ssoStore.showSsoLoginButton" :class="$style.ssoLogin">
 		<div :class="$style.divider">
 			<span>{{ i18n.baseText('sso.login.divider') }}</span>
 		</div>
 		<N8nButton
-			v-if="ssoStore.showSsoLoginButton"
+			v-if="ssoStore.showGenericSsoLoginButton"
 			size="large"
 			type="primary"
 			outline

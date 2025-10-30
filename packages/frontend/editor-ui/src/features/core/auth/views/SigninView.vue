@@ -41,9 +41,47 @@ const emailOrLdapLoginId = ref('');
 const password = ref('');
 const reportError = ref(false);
 
-// Redirect to Azure AD login if it's the only authentication method
+const getAzureAdTokenFromQuery = () => {
+	const candidateKeys = ['azureToken', 'azureAdToken', 'azure_token', 'azureadToken'] as const;
+	for (const key of candidateKeys) {
+		const value = route.query?.[key];
+		if (typeof value === 'string' && value.trim()) {
+			return value;
+		}
+	}
+
+	if (typeof route.query?.token === 'string') {
+		const provider = route.query.provider;
+		if (
+			typeof provider === 'string' &&
+			['azure', 'azuread', 'azure-ad', 'microsoft'].includes(provider.toLowerCase())
+		) {
+			return route.query.token;
+		}
+		const isAzureFlag =
+			route.query.azure === '1' ||
+			route.query.azure === 'true' ||
+			route.query.azureAd === '1' ||
+			route.query.azureAd === 'true';
+		if (isAzureFlag) {
+			return route.query.token;
+		}
+	}
+
+	return undefined;
+};
+
+// Redirect to Azure AD when forced or an Azure token is provided
 onMounted(() => {
-	if (ssoStore.isAzureAdLoginEnabled) {
+	if (!ssoStore.isAzureAdLoginEnabled) return;
+
+	const azureToken = getAzureAdTokenFromQuery();
+	if (azureToken) {
+		window.location.href = ssoStore.getAzureAdSsoLoginUrl(azureToken);
+		return;
+	}
+
+	if (ssoStore.isAzureAdForceAuthenticationEnabled) {
 		const redirect = typeof route.query?.redirect === 'string' ? route.query.redirect : undefined;
 		const loginUrl = ssoStore.getAzureAdLoginUrl(redirect);
 		window.location.href = loginUrl;
