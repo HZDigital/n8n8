@@ -115,6 +115,8 @@ export class FrontendService {
 	private initSettings() {
 		const instanceBaseUrl = this.urlService.getInstanceBaseUrl();
 		const restEndpoint = this.globalConfig.endpoints.rest;
+		const hideGenericSsoLoginButton = process.env.N8N_HIDE_GENERIC_SSO_LOGIN_BUTTON === 'true';
+		const azureAdConfig = this.globalConfig.azureAd;
 
 		const telemetrySettings: ITelemetrySettings = {
 			enabled: this.globalConfig.diagnostics.enabled,
@@ -218,6 +220,14 @@ export class FrontendService {
 					loginEnabled: false,
 					loginUrl: `${instanceBaseUrl}/${restEndpoint}/sso/oidc/login`,
 					callbackUrl: `${instanceBaseUrl}/${restEndpoint}/sso/oidc/callback`,
+				},
+				hideGenericSsoLoginButton,
+				azureAd: {
+					loginEnabled: azureAdConfig.loginEnabled,
+					loginLabel: azureAdConfig.loginLabel,
+					loginUrl: `${instanceBaseUrl}/${restEndpoint}/azure-ad/login`,
+					ssoLoginUrl: `${instanceBaseUrl}/${restEndpoint}/azure-ad/sso-login`,
+					forceAuthentication: azureAdConfig.forceAuthentication,
 				},
 			},
 			dataTables: {
