@@ -197,7 +197,9 @@ export class AzureAdController {
 				return sendErrorResponse(req.res, error as Error);
 			}
 		}
-	} /**
+	}
+
+	/**
 	 * Get Azure AD configuration info (for frontend)
 	 * GET /rest/azure-ad/config
 	 */
