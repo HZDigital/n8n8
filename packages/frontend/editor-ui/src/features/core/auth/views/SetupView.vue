@@ -8,6 +8,7 @@ import { useI18n } from '@n8n/i18n';
 import { useSettingsStore } from '@/stores/settings.store';
 import { useUsersStore } from '@/features/settings/users/users.store';
 import { useSSOStore } from '@/features/settings/sso/sso.store';
+import { getAzureAdTokenFromQuery } from '@/composables/useAzureAdToken';
 
 import type { IFormBoxConfig } from '@/Interface';
 import { VIEWS } from '@/constants';
@@ -25,36 +26,6 @@ const route = useRoute();
 
 const loading = ref(false);
 
-const getAzureAdTokenFromQuery = () => {
-	const candidateKeys = ['azureToken', 'azureAdToken', 'azure_token', 'azureadToken'] as const;
-	for (const key of candidateKeys) {
-		const value = route.query?.[key];
-		if (typeof value === 'string' && value.trim()) {
-			return value;
-		}
-	}
-
-	if (typeof route.query?.token === 'string') {
-		const provider = route.query.provider;
-		if (
-			typeof provider === 'string' &&
-			['azure', 'azuread', 'azure-ad', 'microsoft'].includes(provider.toLowerCase())
-		) {
-			return route.query.token;
-		}
-		const isAzureFlag =
-			route.query.azure === '1' ||
-			route.query.azure === 'true' ||
-			route.query.azureAd === '1' ||
-			route.query.azureAd === 'true';
-		if (isAzureFlag) {
-			return route.query.token;
-		}
-	}
-
-	return undefined;
-};
-
 // Redirect to Azure AD login for owner setup when enforced or an Azure token is supplied
 onMounted(async () => {
 	// Check if user is already authenticated
@@ -66,7 +37,7 @@ onMounted(async () => {
 
 	if (!ssoStore.isAzureAdLoginEnabled) return;
 
-	const azureToken = getAzureAdTokenFromQuery();
+	const azureToken = getAzureAdTokenFromQuery(route);
 	if (azureToken) {
 		const ssoLoginUrl = ssoStore.getAzureAdSsoLoginUrl(azureToken);
 		window.location.href = ssoLoginUrl;

@@ -16,6 +16,7 @@ import { useSSOStore } from '@/features/settings/sso/sso.store';
 import type { IFormBoxConfig } from '@/Interface';
 import { MFA_AUTHENTICATION_REQUIRED_ERROR_CODE, VIEWS, MFA_FORM } from '@/constants';
 import type { LoginRequestDto } from '@n8n/api-types';
+import { getAzureAdTokenFromQuery } from '@/composables/useAzureAdToken';
 
 export type EmailOrLdapLoginIdAndPassword = Pick<
 	LoginRequestDto,
@@ -41,41 +42,11 @@ const emailOrLdapLoginId = ref('');
 const password = ref('');
 const reportError = ref(false);
 
-const getAzureAdTokenFromQuery = () => {
-	const candidateKeys = ['azureToken', 'azureAdToken', 'azure_token', 'azureadToken'] as const;
-	for (const key of candidateKeys) {
-		const value = route.query?.[key];
-		if (typeof value === 'string' && value.trim()) {
-			return value;
-		}
-	}
-
-	if (typeof route.query?.token === 'string') {
-		const provider = route.query.provider;
-		if (
-			typeof provider === 'string' &&
-			['azure', 'azuread', 'azure-ad', 'microsoft'].includes(provider.toLowerCase())
-		) {
-			return route.query.token;
-		}
-		const isAzureFlag =
-			route.query.azure === '1' ||
-			route.query.azure === 'true' ||
-			route.query.azureAd === '1' ||
-			route.query.azureAd === 'true';
-		if (isAzureFlag) {
-			return route.query.token;
-		}
-	}
-
-	return undefined;
-};
-
 // Redirect to Azure AD when forced or an Azure token is provided
 onMounted(() => {
 	if (!ssoStore.isAzureAdLoginEnabled) return;
 
-	const azureToken = getAzureAdTokenFromQuery();
+	const azureToken = getAzureAdTokenFromQuery(route);
 	if (azureToken) {
 		window.location.href = ssoStore.getAzureAdSsoLoginUrl(azureToken);
 		return;
