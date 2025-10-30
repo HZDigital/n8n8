@@ -251,25 +251,4 @@ export class AzureAdController {
 		}
 	}
 
-	/**
-	 * Validate redirect URL is safe
-	 */
-	private isRedirectSafe(redirect: string): boolean {
-		// Allow relative URLs
-		if (redirect.startsWith('/')) {
-			return true;
-		}
-
-		try {
-			// Only allow same origin
-			const url = new URL(redirect);
-			const currentOrigin = new URL(
-				process.env.N8N_EDITOR_BASE_URL ?? `http://localhost:${process.env.N8N_PORT ?? 5678}`,
-			).origin;
-
-			return url.origin === currentOrigin;
-		} catch {
-			return false;
-		}
-	}
 }
