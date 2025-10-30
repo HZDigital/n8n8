@@ -53,4 +53,8 @@ export class AzureAdConfig {
 	/** Whether to force Azure AD authentication (disable email/password login) */
 	@Env('N8N_AZURE_AD_FORCE_AUTHENTICATION')
 	forceAuthentication: boolean = false;
+
+	/** Duration (ms) before temporary PKCE verifiers expire */
+	@Env('N8N_AZURE_AD_STATE_TIMEOUT')
+	stateTimeout: number = 10 * 60 * 1000;
 }

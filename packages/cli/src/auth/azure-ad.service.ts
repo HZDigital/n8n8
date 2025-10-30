@@ -1,7 +1,12 @@
 import { Logger } from '@n8n/backend-common';
 import { GlobalConfig, AzureAdConfig } from '@n8n/config';
 import type { User } from '@n8n/db';
-import { AuthIdentityRepository, UserRepository, RoleRepository } from '@n8n/db';
+import {
+	AuthIdentityRepository,
+	UserRepository,
+	RoleRepository,
+	SettingsRepository,
+} from '@n8n/db';
 import { Service } from '@n8n/di';
 import config from '@/config';
 import {
@@ -24,10 +29,9 @@ interface AzureAdUserProfile {
 	id: string;
 }
 
-interface PkceData {
+interface PkceStoreEntry {
 	codeVerifier: string;
-	codeChallenge: string;
-	codeChallengeMethod: string;
+	createdAt: number;
 }
 
 @Service()
@@ -35,8 +39,9 @@ export class AzureAdService {
 	private msalClient: ConfidentialClientApplication | null = null;
 	private config: AzureAdConfig;
 	private cryptoProvider: CryptoProvider;
-	// Store PKCE verifiers temporarily (state -> codeVerifier)
-	private pkceStore: Map<string, string> = new Map();
+	private readonly pkceEntryTtl: number;
+	// Store PKCE verifiers temporarily (state -> codeVerifier + metadata)
+	private pkceStore: Map<string, PkceStoreEntry> = new Map();
 
 	constructor(
 		private readonly globalConfig: GlobalConfig,
@@ -44,8 +49,10 @@ export class AzureAdService {
 		private readonly userRepository: UserRepository,
 		private readonly authIdentityRepository: AuthIdentityRepository,
 		private readonly roleRepository: RoleRepository,
+		private readonly settingsRepository: SettingsRepository,
 	) {
 		this.config = globalConfig.azureAd;
+		this.pkceEntryTtl = this.config.stateTimeout ?? 10 * 60 * 1000;
 		this.cryptoProvider = new CryptoProvider();
 		if (this.config.loginEnabled) {
 			this.initializeMsalClient();
@@ -113,9 +120,12 @@ export class AzureAdService {
 		const { verifier, challenge } = await this.cryptoProvider.generatePkceCodes();
 
 		// Store the verifier for later use in the callback
-		this.pkceStore.set(state, verifier);
+		this.pkceStore.set(state, {
+			codeVerifier: verifier,
+			createdAt: Date.now(),
+		});
 
-		// Clean up old verifiers (older than 10 minutes)
+		// Clean up expired verifiers
 		this.cleanupPkceStore();
 
 		const authCodeUrlParameters: AuthorizationUrlRequest = {
@@ -143,13 +153,18 @@ export class AzureAdService {
 	 * Clean up old PKCE verifiers (simple time-based cleanup)
 	 */
 	private cleanupPkceStore() {
-		// In a production environment, you'd want to store timestamps and clean based on age
-		// For now, if we have more than 100 entries, clear the oldest 50
-		if (this.pkceStore.size > 100) {
-			const entries = Array.from(this.pkceStore.entries());
-			const toDelete = entries.slice(0, 50);
-			toDelete.forEach(([key]) => this.pkceStore.delete(key));
-			this.logger.debug('Cleaned up old PKCE verifiers');
+		const now = Date.now();
+		let removed = 0;
+
+		for (const [state, data] of this.pkceStore.entries()) {
+			if (now - data.createdAt > this.pkceEntryTtl) {
+				this.pkceStore.delete(state);
+				removed += 1;
+			}
+		}
+
+		if (removed > 0) {
+			this.logger.debug(`Cleaned up ${removed} expired PKCE verifiers`);
 		}
 	}
 
@@ -162,9 +177,16 @@ export class AzureAdService {
 		}
 
 		// Retrieve the PKCE code verifier
-		const codeVerifier = this.pkceStore.get(state);
-		if (!codeVerifier) {
+		const pkceEntry = this.pkceStore.get(state);
+		if (!pkceEntry) {
 			this.logger.error('PKCE code verifier not found for state', { state });
+			throw new AuthError('Invalid authentication state. Please try again.');
+		}
+
+		const now = Date.now();
+		if (now - pkceEntry.createdAt > this.pkceEntryTtl) {
+			this.pkceStore.delete(state);
+			this.logger.error('PKCE code verifier expired for state', { state });
 			throw new AuthError('Invalid authentication state. Please try again.');
 		}
 
@@ -177,7 +199,7 @@ export class AzureAdService {
 			code,
 			scopes,
 			redirectUri: this.config.redirectUri,
-			codeVerifier, // Include PKCE code verifier
+			codeVerifier: pkceEntry.codeVerifier, // Include PKCE code verifier
 		};
 
 		try {
@@ -419,6 +441,11 @@ export class AzureAdService {
 
 		// If this is the first user (owner), mark instance as set up
 		if (isFirstUser) {
+			await this.settingsRepository.save({
+				key: 'userManagement.isInstanceOwnerSetUp',
+				value: JSON.stringify(true),
+				loadOnStartup: true,
+			});
 			config.set('userManagement.isInstanceOwnerSetUp', true);
 			this.logger.info('Instance owner setup completed via Azure AD');
 		}
