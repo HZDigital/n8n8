@@ -228,7 +228,6 @@ export class AzureAdService {
 				stack: error instanceof Error ? error.stack : undefined,
 				details: error,
 			});
-			console.error('DETAILED ERROR:', error);
 			if (error instanceof AuthError) {
 				throw error;
 			}
