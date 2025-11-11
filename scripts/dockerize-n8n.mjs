@@ -72,7 +72,7 @@ async function commandExists(command) {
 	}
 }
 
-const SupportedContainerEngines = /** @type {const} */(['docker', 'podman'])
+const SupportedContainerEngines = /** @type {const} */ (['docker', 'podman']);
 /**
  * @returns {Promise<(typeof SupportedContainerEngines[number])>}
  */
@@ -93,8 +93,8 @@ const rootDir = isInScriptsDir ? path.join(__dirname, '..') : __dirname;
 
 const config = {
 	dockerfilePath: path.join(rootDir, 'docker/images/n8n/Dockerfile'),
-	imageBaseName: process.env.IMAGE_BASE_NAME || 'n8nio/n8n',
-	imageTag: process.env.IMAGE_TAG || 'local',
+	imageBaseName: process.env.IMAGE_BASE_NAME || 'n8n8',
+	imageTag: process.env.IMAGE_TAG || 'latest',
 	buildContext: rootDir,
 	compiledAppDir: path.join(rootDir, 'compiled'),
 	get fullImageName() {
