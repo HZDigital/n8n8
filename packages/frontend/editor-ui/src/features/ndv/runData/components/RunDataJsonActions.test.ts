@@ -4,16 +4,17 @@ import { createPinia, setActivePinia } from 'pinia';
 import { waitFor, cleanup, fireEvent, within, screen } from '@testing-library/vue';
 
 import RunDataJsonActions from './RunDataJsonActions.vue';
-import { nonExistingJsonPath, VIEWS } from '@/constants';
+import { nonExistingJsonPath, VIEWS } from '@/app/constants';
 import type { IWorkflowDb } from '@/Interface';
 import { useNDVStore } from '@/features/ndv/shared/ndv.store';
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
-import { useWorkflowsStore } from '@/stores/workflows.store';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
 
 import { createComponentRenderer } from '@/__tests__/render';
 import { setupServer } from '@/__tests__/server';
 import { defaultNodeDescriptions, mockNodes } from '@/__tests__/mocks';
 import { useI18n } from '@n8n/i18n';
+import { createRunExecutionData } from 'n8n-workflow';
 
 vi.mock('vue-router', () => {
 	return {
@@ -24,7 +25,7 @@ vi.mock('vue-router', () => {
 });
 
 const copy = vi.fn();
-vi.mock('@/composables/useClipboard', () => ({
+vi.mock('@/app/composables/useClipboard', () => ({
 	useClipboard: () => ({
 		copy,
 	}),
@@ -63,7 +64,7 @@ async function createPiniaWithActiveNode() {
 		createdAt: new Date(),
 		startedAt: new Date(),
 		workflowData: workflow,
-		data: {
+		data: createRunExecutionData({
 			resultData: {
 				runData: {
 					[node.name]: [
@@ -112,7 +113,7 @@ async function createPiniaWithActiveNode() {
 					],
 				},
 			},
-		},
+		}),
 	};
 
 	ndvStore.setActiveNodeName(node.name, 'other');

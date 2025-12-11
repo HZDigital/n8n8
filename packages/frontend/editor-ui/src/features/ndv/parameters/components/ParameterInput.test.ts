@@ -6,8 +6,8 @@ import { createTestingPinia } from '@pinia/testing';
 import { faker } from '@faker-js/faker';
 import { fireEvent, waitFor, within } from '@testing-library/vue';
 import userEvent from '@testing-library/user-event';
-import type { useNodeTypesStore } from '@/stores/nodeTypes.store';
-import { useSettingsStore } from '@/stores/settings.store';
+import type { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
+import { useSettingsStore } from '@/app/stores/settings.store';
 import { mockedStore } from '@/__tests__/utils';
 import { createEventBus } from '@n8n/utils/event-bus';
 import {
@@ -17,11 +17,11 @@ import {
 	createTestWorkflowObject,
 	createTestNodeProperties,
 } from '@/__tests__/mocks';
-import { useWorkflowsStore } from '@/stores/workflows.store';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
 import { NodeConnectionTypes, type INodeParameterResourceLocator } from 'n8n-workflow';
 import type { IWorkflowDb, WorkflowListResource } from '@/Interface';
 import { mock } from 'vitest-mock-extended';
-import { ExpressionLocalResolveContextSymbol } from '@/constants';
+import { ExpressionLocalResolveContextSymbol } from '@/app/constants';
 import { nextTick } from 'vue';
 
 function getNdvStateMock(): Partial<ReturnType<typeof useNDVStore>> {
@@ -61,6 +61,9 @@ beforeEach(() => {
 	mockNdvState = getNdvStateMock();
 	mockNodeTypesState = getNodeTypesStateMock();
 	mockCompletionResult = {};
+	mockBuilderState.trackWorkflowBuilderJourney.mockClear();
+	mockIsPlaceholderValue.mockClear();
+	mockBuilderState.isAIBuilderEnabled = true;
 });
 
 vi.mock('@/features/ndv/shared/ndv.store', () => {
@@ -69,7 +72,7 @@ vi.mock('@/features/ndv/shared/ndv.store', () => {
 	};
 });
 
-vi.mock('@/stores/nodeTypes.store', () => {
+vi.mock('@/app/stores/nodeTypes.store', () => {
 	return {
 		useNodeTypesStore: vi.fn(() => mockNodeTypesState),
 	};
@@ -92,6 +95,25 @@ vi.mock('vue-router', () => {
 		}),
 		useRoute: () => ({}),
 		RouterLink: vi.fn(),
+	};
+});
+
+const mockBuilderState = {
+	trackWorkflowBuilderJourney: vi.fn(),
+	isAIBuilderEnabled: true,
+};
+
+vi.mock('@/features/ai/assistant/builder.store', () => {
+	return {
+		useBuilderStore: vi.fn(() => mockBuilderState),
+	};
+});
+
+const mockIsPlaceholderValue = vi.fn();
+
+vi.mock('@/features/ai/assistant/composables/useBuilderTodos', () => {
+	return {
+		isPlaceholderValue: (value: unknown) => mockIsPlaceholderValue(value),
 	};
 });
 
@@ -756,6 +778,105 @@ describe('ParameterInput.vue', () => {
 			await fireEvent.focusIn(rendered.container.querySelector('.parameter-input')!);
 
 			expect(rendered.queryByTestId('ndv-input-panel')).not.toBeInTheDocument();
+		});
+	});
+
+	describe('placeholder tracking', () => {
+		it('tracks field_focus_placeholder_in_ndv when focusing placeholder value', async () => {
+			mockIsPlaceholderValue.mockReturnValue(true);
+			mockNdvState = {
+				...getNdvStateMock(),
+				activeNode: {
+					id: faker.string.uuid(),
+					name: 'Test Node',
+					parameters: {},
+					position: [0, 0],
+					type: 'n8n-nodes-base.httpRequest',
+					typeVersion: 1,
+				},
+			};
+
+			const rendered = renderComponent({
+				props: {
+					path: 'url',
+					parameter: createTestNodeProperties({ name: 'url', type: 'string' }),
+					modelValue: '<__PLACEHOLDER_VALUE__API URL__>',
+				},
+			});
+
+			await nextTick();
+			const input = rendered.container.querySelector('input');
+			if (input) {
+				await fireEvent.focus(input);
+			}
+
+			expect(mockBuilderState.trackWorkflowBuilderJourney).toHaveBeenCalledWith(
+				'field_focus_placeholder_in_ndv',
+				{ node_type: 'n8n-nodes-base.httpRequest' },
+			);
+		});
+
+		it('does not track when value is not a placeholder', async () => {
+			mockIsPlaceholderValue.mockReturnValue(false);
+			mockNdvState = {
+				...getNdvStateMock(),
+				activeNode: {
+					id: faker.string.uuid(),
+					name: 'Test Node',
+					parameters: {},
+					position: [0, 0],
+					type: 'n8n-nodes-base.httpRequest',
+					typeVersion: 1,
+				},
+			};
+
+			const rendered = renderComponent({
+				props: {
+					path: 'url',
+					parameter: createTestNodeProperties({ name: 'url', type: 'string' }),
+					modelValue: 'https://api.example.com',
+				},
+			});
+
+			await nextTick();
+			const input = rendered.container.querySelector('input');
+			if (input) {
+				await fireEvent.focus(input);
+			}
+
+			expect(mockBuilderState.trackWorkflowBuilderJourney).not.toHaveBeenCalled();
+		});
+
+		it('does not track when AI builder is disabled', async () => {
+			mockIsPlaceholderValue.mockReturnValue(true);
+			mockBuilderState.isAIBuilderEnabled = false;
+			mockNdvState = {
+				...getNdvStateMock(),
+				activeNode: {
+					id: faker.string.uuid(),
+					name: 'Test Node',
+					parameters: {},
+					position: [0, 0],
+					type: 'n8n-nodes-base.httpRequest',
+					typeVersion: 1,
+				},
+			};
+
+			const rendered = renderComponent({
+				props: {
+					path: 'url',
+					parameter: createTestNodeProperties({ name: 'url', type: 'string' }),
+					modelValue: '<__PLACEHOLDER_VALUE__API URL__>',
+				},
+			});
+
+			await nextTick();
+			const input = rendered.container.querySelector('input');
+			if (input) {
+				await fireEvent.focus(input);
+			}
+
+			expect(mockBuilderState.trackWorkflowBuilderJourney).not.toHaveBeenCalled();
 		});
 	});
 });

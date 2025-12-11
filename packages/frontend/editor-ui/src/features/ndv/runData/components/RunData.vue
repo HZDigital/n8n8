@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useStorage } from '@/composables/useStorage';
+import { useStorage } from '@/app/composables/useStorage';
 import { saveAs } from 'file-saver';
 import NodeSettingsHint from '@/features/ndv/settings/components/NodeSettingsHint.vue';
 import type {
@@ -31,49 +31,47 @@ import {
 	LOCAL_STORAGE_PIN_DATA_DISCOVERY_NDV_FLAG,
 	MAX_DISPLAY_DATA_SIZE,
 	MAX_DISPLAY_DATA_SIZE_SCHEMA_VIEW,
-	NDV_UI_OVERHAUL_EXPERIMENT,
 	NODE_TYPES_EXCLUDED_FROM_OUTPUT_NAME_APPEND,
 	RUN_DATA_DEFAULT_PAGE_SIZE,
-} from '@/constants';
-import { DUMMY_PIN_DATA } from '@/constants/samples';
+} from '@/app/constants';
+import { DUMMY_PIN_DATA } from '@/app/constants/samples';
 
 import BinaryDataDisplay from './BinaryDataDisplay.vue';
 import NodeErrorView from './error/NodeErrorView.vue';
 import JsonEditor from '@/features/shared/editors/components/JsonEditor/JsonEditor.vue';
 
-import { useRunWorkflow } from '@/composables/useRunWorkflow';
+import { useRunWorkflow } from '@/app/composables/useRunWorkflow';
 import RunDataPinButton from './RunDataPinButton.vue';
-import { useExternalHooks } from '@/composables/useExternalHooks';
+import { useExternalHooks } from '@/app/composables/useExternalHooks';
 import { useI18n } from '@n8n/i18n';
-import { useNodeHelpers } from '@/composables/useNodeHelpers';
-import { useNodeType } from '@/composables/useNodeType';
-import type { PinDataSource, UnpinDataSource } from '@/composables/usePinnedData';
-import { usePinnedData } from '@/composables/usePinnedData';
-import { useTelemetry } from '@/composables/useTelemetry';
-import { useToast } from '@/composables/useToast';
-import { dataPinningEventBus } from '@/event-bus';
+import { useNodeHelpers } from '@/app/composables/useNodeHelpers';
+import { useNodeType } from '@/app/composables/useNodeType';
+import type { PinDataSource, UnpinDataSource } from '@/app/composables/usePinnedData';
+import { usePinnedData } from '@/app/composables/usePinnedData';
+import { useTelemetry } from '@/app/composables/useTelemetry';
+import { useToast } from '@/app/composables/useToast';
+import { dataPinningEventBus } from '@/app/event-bus';
 import { ndvEventBus } from '@/features/ndv/shared/ndv.eventBus';
 import { useNDVStore } from '@/features/ndv/shared/ndv.store';
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import { useRootStore } from '@n8n/stores/useRootStore';
 import { useSourceControlStore } from '@/features/integrations/sourceControl.ee/sourceControl.store';
-import { useWorkflowsStore } from '@/stores/workflows.store';
-import { executionDataToJson } from '@/utils/nodeTypesUtils';
-import { getGenericHints } from '@/utils/nodeViewUtils';
-import { searchInObject } from '@/utils/objectUtils';
-import { clearJsonKey, isEmpty, isPresent } from '@/utils/typesUtils';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
+import { executionDataToJson } from '@/app/utils/nodeTypesUtils';
+import { getGenericHints } from '@/app/utils/nodeViewUtils';
+import { searchInObject } from '@/app/utils/objectUtils';
+import { clearJsonKey, isEmpty, isPresent } from '@/app/utils/typesUtils';
 import isEqual from 'lodash/isEqual';
 import isObject from 'lodash/isObject';
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
-import { useSchemaPreviewStore } from '@/stores/schemaPreview.store';
+import { useSchemaPreviewStore } from '@/features/ndv/runData/schemaPreview.store';
 import { asyncComputed } from '@vueuse/core';
 import ViewSubExecution from '@/features/execution/executions/components/ViewSubExecution.vue';
 import RunDataItemCount from './RunDataItemCount.vue';
 import RunDataDisplayModeSelect from './RunDataDisplayModeSelect.vue';
 import RunDataPaginationBar from './RunDataPaginationBar.vue';
-import { parseAiContent } from '@/utils/aiUtils';
-import { usePostHog } from '@/stores/posthog.store';
+import { parseAiContent } from '@/app/utils/aiUtils';
 import { I18nT } from 'vue-i18n';
 import RunDataBinary from './RunDataBinary.vue';
 import { hasTrimmedRunData } from '@/features/execution/executions/executions.utils';
@@ -94,7 +92,8 @@ import {
 	N8nText,
 	N8nTooltip,
 } from '@n8n/design-system';
-import { injectWorkflowState } from '@/composables/useWorkflowState';
+import { injectWorkflowState } from '@/app/composables/useWorkflowState';
+
 const LazyRunDataTable = defineAsyncComponent(async () => await import('./RunDataTable.vue'));
 const LazyRunDataJson = defineAsyncComponent(async () => await import('./RunDataJson.vue'));
 
@@ -113,7 +112,6 @@ type Props = {
 	workflowObject: Workflow;
 	workflowExecution?: IRunExecutionData;
 	runIndex: number;
-	tooMuchDataTitle: string;
 	executingMessage: string;
 	pushRef?: string;
 	paneType: NodePanelType;
@@ -230,7 +228,6 @@ const workflowState = injectWorkflowState();
 const sourceControlStore = useSourceControlStore();
 const rootStore = useRootStore();
 const schemaPreviewStore = useSchemaPreviewStore();
-const posthogStore = usePostHog();
 
 const toast = useToast();
 const route = useRoute();
@@ -637,12 +634,7 @@ const isSchemaPreviewEnabled = computed(
 		!(nodeType.value?.codex?.categories ?? []).some((category) => category === CORE_NODES_CATEGORY),
 );
 
-const isNDVV2 = computed(() =>
-	posthogStore.isVariantEnabled(
-		NDV_UI_OVERHAUL_EXPERIMENT.name,
-		NDV_UI_OVERHAUL_EXPERIMENT.variant,
-	),
-);
+const isNDVV2 = computed(() => true);
 
 const hasPreviewSchema = asyncComputed(async () => {
 	if (!isSchemaPreviewEnabled.value || props.nodes.length === 0) return false;
@@ -808,6 +800,7 @@ function getResolvedNodeOutputs() {
 	}
 	return [];
 }
+
 function shouldHintBeDisplayed(hint: NodeHint): boolean {
 	const { location, whenToDisplay } = hint;
 
@@ -964,6 +957,8 @@ function enterEditMode({ origin }: EnterEditModeArgs) {
 		is_output_present: hasNodeRun.value || pinnedData.hasData.value,
 		view: !hasNodeRun.value && !pinnedData.hasData.value ? 'undefined' : props.displayMode,
 		is_data_pinned: pinnedData.hasData.value,
+		workflow_id: workflowsStore.workflowId,
+		node_id: activeNode.value?.id,
 	});
 }
 
@@ -1039,6 +1034,8 @@ async function onTogglePinData({ source }: { source: PinDataSource | UnpinDataSo
 			push_ref: props.pushRef,
 			run_index: props.runIndex,
 			view: !hasNodeRun.value && !pinnedData.hasData.value ? 'none' : props.displayMode,
+			workflow_id: workflowsStore.workflowId,
+			node_id: activeNode.value?.id,
 		};
 
 		void externalHooks.run('runData.onTogglePinData', telemetryPayload);
@@ -1420,7 +1417,7 @@ function onSearchClear() {
 
 function executeNode(nodeName: string) {
 	void runWorkflow({
-		destinationNode: nodeName,
+		destinationNode: { nodeName, mode: 'inclusive' },
 		source: 'schema-preview',
 	});
 }
@@ -1726,9 +1723,9 @@ defineExpose({ enterEditMode });
 			</div>
 
 			<div v-else-if="editMode.enabled" :class="$style.editMode">
-				<N8nText v-if="previousExecutionDataUsedInEditMode" class="mb-2xs" size="small">{{
-					i18n.baseText('runData.pinData.insertedExecutionData')
-				}}</N8nText>
+				<N8nText v-if="previousExecutionDataUsedInEditMode" class="mb-2xs" size="small"
+					>{{ i18n.baseText('runData.pinData.insertedExecutionData') }}
+				</N8nText>
 				<div :class="[$style.editModeBody, 'ignore-key-press-canvas']">
 					<JsonEditor
 						:model-value="editMode.value"
@@ -1831,27 +1828,34 @@ defineExpose({ enterEditMode });
 				data-test-id="ndv-data-size-warning"
 				:class="$style.center"
 			>
-				<NDVEmptyState :title="tooMuchDataTitle">
-					<span
-						v-n8n-html="
-							i18n.baseText('ndv.output.tooMuchData.message', {
-								interpolate: { size: dataSizeInMB },
+				<div :class="$style.dataSizeWarning">
+					<NDVEmptyState
+						:title="
+							i18n.baseText('ndv.tooMuchData.title', {
+								interpolate: {
+									size: dataSizeInMB,
+								},
 							})
 						"
-					/>
-				</NDVEmptyState>
+					>
+						<span v-n8n-html="i18n.baseText('ndv.tooMuchData.message')" />
+					</NDVEmptyState>
 
-				<N8nButton
-					outline
-					:label="i18n.baseText('ndv.output.tooMuchData.showDataAnyway')"
-					@click="showTooMuchData"
-				/>
+					<div :class="$style.warningActions">
+						<N8nButton
+							outline
+							size="small"
+							:label="i18n.baseText('runData.downloadBinaryData')"
+							@click="downloadJsonData()"
+						/>
 
-				<N8nButton
-					size="small"
-					:label="i18n.baseText('runData.downloadBinaryData')"
-					@click="downloadJsonData()"
-				/>
+						<N8nButton
+							size="small"
+							:label="i18n.baseText('ndv.tooMuchData.showDataAnyway')"
+							@click="showTooMuchData"
+						/>
+					</div>
+				</div>
 			</div>
 
 			<!-- V-else slot named content which only renders if $slots.content is passed and hasNodeRun -->
@@ -1978,7 +1982,13 @@ defineExpose({ enterEditMode });
 			@update:current-page="onCurrentPageChange"
 			@update:page-size="onPageSizeChange"
 		/>
-		<N8nBlockUi :show="blockUI" :class="$style.uiBlocker" />
+		<N8nBlockUi
+			:show="blockUI"
+			:class="{
+				[$style.uiBlocker]: true,
+				[$style.uiBlockerNdvV2]: isNDVV2,
+			}"
+		/>
 	</div>
 </template>
 
@@ -2239,6 +2249,10 @@ defineExpose({ enterEditMode });
 	border-bottom-left-radius: 0;
 }
 
+.uiBlockerNdvV2 {
+	border-radius: 0;
+}
+
 .hintCallout {
 	margin-bottom: var(--spacing--xs);
 	margin-left: var(--ndv--spacing);
@@ -2310,6 +2324,25 @@ defineExpose({ enterEditMode });
 .ndv-v2,
 .compact {
 	--ndv--spacing: var(--spacing--2xs);
+}
+
+.dataSizeWarning {
+	padding: var(--spacing--sm) var(--spacing--md);
+	text-align: center;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--spacing--sm);
+}
+
+.warningActions {
+	display: flex;
+	flex-direction: row;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: var(--spacing--2xs);
+	width: 100%;
+	align-items: center;
 }
 </style>
 

@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { useI18n } from '@n8n/i18n';
+import { useDebounce } from '@/app/composables/useDebounce';
 import type { IResourceLocatorResultExpanded } from '@/Interface';
+import { N8nBadge, N8nIcon, N8nInput, N8nLoading, N8nPopover, N8nText } from '@n8n/design-system';
+import { useI18n } from '@n8n/i18n';
 import type { EventBus } from '@n8n/utils/event-bus';
 import { createEventBus } from '@n8n/utils/event-bus';
 import type { INodeParameterResourceLocator } from 'n8n-workflow';
 import { computed, onBeforeUnmount, onMounted, ref, useCssModule, watch } from 'vue';
 
-import { N8nBadge, N8nIcon, N8nInput, N8nLoading, N8nPopover } from '@n8n/design-system';
 const SEARCH_BAR_HEIGHT_PX = 40;
 const SCROLL_MARGIN_PX = 10;
 
@@ -23,6 +24,9 @@ type Props = {
 	width?: number;
 	allowNewResources?: { label?: string };
 	eventBus?: EventBus;
+	disableInactiveItems?: boolean;
+	slowLoadNotice?: string;
+	showSlowLoadNotice?: boolean;
 };
 
 const props = withDefaults(defineProps<Props>(), {
@@ -37,7 +41,10 @@ const props = withDefaults(defineProps<Props>(), {
 	filterRequired: false,
 	width: undefined,
 	allowNewResources: () => ({}),
+	disableInactiveItems: false,
 	eventBus: () => createEventBus(),
+	slowLoadNotice: undefined,
+	showSlowLoadNotice: false,
 });
 
 const emit = defineEmits<{
@@ -46,6 +53,14 @@ const emit = defineEmits<{
 	filter: [filter: string];
 	addResourceClick: [];
 }>();
+
+const { debounce } = useDebounce();
+const debouncedLoadMore = debounce(
+	() => {
+		emit('loadMore');
+	},
+	{ debounceTime: 500 },
+);
 
 const i18n = useI18n();
 const $style = useCssModule();
@@ -164,10 +179,15 @@ function onKeyDown(e: KeyboardEvent) {
 			return;
 		}
 
-		const selected = sortedResources.value[hoverIndex.value - 1]?.value;
+		const item = sortedResources.value[hoverIndex.value - 1];
+		const selected = item?.value;
 
 		// Selected resource can be empty when loading or empty results
 		if (selected && typeof selected !== 'boolean') {
+			if (props.disableInactiveItems && item && 'active' in item && item.active === false) {
+				return;
+			}
+
 			emit('update:modelValue', selected);
 		}
 	}
@@ -177,8 +197,13 @@ function onFilterInput(value: string) {
 	emit('filter', value);
 }
 
-function onItemClick(selected: string | number | boolean) {
+function onItemClick(selected: string | number | boolean, item?: IResourceLocatorResultExpanded) {
 	if (typeof selected === 'boolean') {
+		return;
+	}
+
+	// Prevent selection of inactive items
+	if (props.disableInactiveItems && item && 'active' in item && item.active === false) {
 		return;
 	}
 
@@ -209,7 +234,7 @@ function onResultsEnd() {
 			resultsContainerRef.value.offsetHeight -
 			(resultsContainerRef.value.scrollHeight - resultsContainerRef.value.scrollTop);
 		if (diff > -SCROLL_MARGIN_PX && diff < SCROLL_MARGIN_PX) {
-			emit('loadMore');
+			debouncedLoadMore();
 		}
 	}
 }
@@ -219,6 +244,23 @@ function isWithinDropdown(element: HTMLElement) {
 }
 
 defineExpose({ isWithinDropdown });
+
+const canLoadMore = computed(() => {
+	return props.hasMore && !props.loading && !props.filter;
+});
+
+watch(
+	canLoadMore,
+	(loadMore) => {
+		const isScrollable =
+			!!resultsContainerRef.value &&
+			resultsContainerRef.value?.scrollHeight > resultsContainerRef.value?.clientHeight;
+		if (loadMore && !isScrollable) {
+			debouncedLoadMore();
+		}
+	},
+	{ immediate: true },
+);
 </script>
 
 <template>
@@ -304,32 +346,49 @@ defineExpose({ isWithinDropdown });
 					[$style.resourceItem]: true,
 					[$style.selected]: result.value === props.modelValue?.value,
 					[$style.hovering]: hoverIndex === i + 1,
+					[$style.disabled]:
+						props.disableInactiveItems && 'active' in result && result.active === false,
 				}"
 				data-test-id="rlc-item"
-				@click="() => onItemClick(result.value)"
+				@click="() => onItemClick(result.value, result)"
 				@mouseenter="() => onItemHover(i + 1)"
 				@mouseleave="() => onItemHoverLeave()"
 			>
 				<div :class="$style.resourceNameContainer">
 					<span>{{ result.name }}</span>
-					<span v-if="result.isArchived">
+					<div :class="$style.urlLink">
+						<N8nIcon
+							v-if="showHoverUrl && result.url && hoverIndex === i + 1"
+							icon="external-link"
+							:title="result.linkAlt || i18n.baseText('resourceLocator.mode.list.openUrl')"
+							@click="openUrl($event, result.url)"
+						/>
+					</div>
+					<span v-if="result.isArchived" :class="$style.badgesContainer">
 						<N8nBadge class="ml-3xs" theme="tertiary" bold data-test-id="workflow-archived-tag">
 							{{ i18n.baseText('workflows.item.archived') }}
 						</N8nBadge>
 					</span>
-				</div>
-				<div :class="$style.urlLink">
-					<N8nIcon
-						v-if="showHoverUrl && result.url && hoverIndex === i + 1"
-						icon="external-link"
-						:title="result.linkAlt || i18n.baseText('resourceLocator.mode.list.openUrl')"
-						@click="openUrl($event, result.url)"
-					/>
+					<slot
+						name="item-badge"
+						:item="result"
+						:is-hovered="showHoverUrl && hoverIndex === i + 1"
+					></slot>
 				</div>
 			</div>
 			<div v-if="props.loading && !props.errorView">
 				<div v-for="i in 3" :key="i" :class="$style.loadingItem">
 					<N8nLoading :class="$style.loader" variant="p" :rows="1" />
+				</div>
+				<div
+					v-if="props.showSlowLoadNotice && props.slowLoadNotice"
+					:class="$style.slowLoadNoticeContainer"
+				>
+					<N8nText size="small" :class="$style.tipText"
+						>{{ i18n.baseText('generic.tip') }}:
+					</N8nText>
+
+					<span :class="$style.hintText">{{ props.slowLoadNotice }}</span>
 				</div>
 			</div>
 		</div>
@@ -397,6 +456,14 @@ defineExpose({ isWithinDropdown });
 	&:hover {
 		background-color: var(--color--background);
 	}
+
+	&.disabled {
+		opacity: 0.6;
+
+		&:hover {
+			background-color: transparent;
+		}
+	}
 }
 
 .loadingItem {
@@ -431,11 +498,17 @@ defineExpose({ isWithinDropdown });
 	align-items: center;
 	font-size: var(--font-size--3xs);
 	color: var(--color--text);
-	margin-left: var(--spacing--2xs);
+	margin-left: auto;
 
 	&:hover {
 		color: var(--color--primary);
 	}
+}
+
+.badgesContainer {
+	display: inline-flex;
+	align-items: center;
+	margin-left: auto;
 }
 
 .resourceNameContainer {
@@ -444,6 +517,7 @@ defineExpose({ isWithinDropdown });
 	font-size: var(--font-size--2xs);
 	min-width: 0;
 	align-self: center;
+	flex: 1;
 }
 
 .resourceNameContainer > :first-child {
@@ -463,5 +537,24 @@ defineExpose({ isWithinDropdown });
 	color: var(--color--text--tint-1);
 
 	margin-left: var(--spacing--2xs);
+}
+
+.tipText {
+	color: var(--color--text--shade-1);
+	font-weight: var(--font-weight--bold);
+	white-space: nowrap;
+	align-self: flex-start;
+}
+
+.slowLoadNoticeContainer {
+	display: flex;
+	align-items: center;
+	padding: var(--spacing--xs);
+	font-size: var(--font-size--2xs);
+	color: var(--color--text);
+	gap: var(--spacing--4xs);
+	line-height: var(--line-height--md);
+	word-break: break-word;
+	border-top: var(--border);
 }
 </style>

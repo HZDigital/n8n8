@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeMount, watch } from 'vue';
 
-import { getAppNameFromCredType } from '@/utils/nodeTypesUtils';
+import { getAppNameFromCredType } from '@/app/utils/nodeTypesUtils';
 import type {
 	ICredentialDataDecryptedObject,
 	ICredentialType,
@@ -11,38 +11,42 @@ import { isCommunityPackageName } from 'n8n-workflow';
 
 import type { IUpdateInformation } from '@/Interface';
 import AuthTypeSelector from './AuthTypeSelector.vue';
-import EnterpriseEdition from '@/components/EnterpriseEdition.ee.vue';
+import EnterpriseEdition from '@/app/components/EnterpriseEdition.ee.vue';
 import { useI18n, addCredentialTranslation } from '@n8n/i18n';
-import { useTelemetry } from '@/composables/useTelemetry';
+import { useTelemetry } from '@/app/composables/useTelemetry';
 import {
 	BUILTIN_CREDENTIALS_DOCS_URL,
 	DOCS_DOMAIN,
 	EnterpriseEditionFeature,
 	NEW_ASSISTANT_SESSION_MODAL,
-} from '@/constants';
+} from '@/app/constants';
 import type { PermissionsRecord } from '@n8n/permissions';
 import { useCredentialsStore } from '../../credentials.store';
 import { useNDVStore } from '@/features/ndv/shared/ndv.store';
 import { useRootStore } from '@n8n/stores/useRootStore';
-import { useUIStore } from '@/stores/ui.store';
-import { useWorkflowsStore } from '@/stores/workflows.store';
-import Banner from '@/components/Banner.vue';
-import CopyInput from '@/components/CopyInput.vue';
+import { useUIStore } from '@/app/stores/ui.store';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
+import Banner from '@/app/components/Banner.vue';
+import CopyInput from '@/app/components/CopyInput.vue';
 import CredentialInputs from './CredentialInputs.vue';
 import GoogleAuthButton from './GoogleAuthButton.vue';
 import OauthButton from './OauthButton.vue';
 import { useChatPanelStore } from '@/features/ai/assistant/chatPanel.store';
 import { useAssistantStore } from '@/features/ai/assistant/assistant.store';
-import FreeAiCreditsCallout from '@/components/FreeAiCreditsCallout.vue';
+import FreeAiCreditsCallout from '@/app/components/FreeAiCreditsCallout.vue';
+import { useEnvFeatureFlag } from '@/features/shared/envFeatureFlag/useEnvFeatureFlag';
 
 import {
-	N8nInlineAskAssistantButton,
 	N8nCallout,
+	N8nIcon,
 	N8nInfoTip,
+	N8nInlineAskAssistantButton,
 	N8nLink,
 	N8nNotice,
 	N8nText,
+	N8nTooltip,
 } from '@n8n/design-system';
+import { ElSwitch } from 'element-plus';
 
 type Props = {
 	mode: string;
@@ -89,6 +93,7 @@ const chatPanelStore = useChatPanelStore();
 
 const i18n = useI18n();
 const telemetry = useTelemetry();
+const { check: checkEnvFeatureFlag } = useEnvFeatureFlag();
 
 onBeforeMount(async () => {
 	uiStore.activeCredentialType = props.credentialType.name;
@@ -193,6 +198,14 @@ const isAskAssistantAvailable = computed(
 
 const assistantAlreadyAsked = computed<boolean>(() => {
 	return assistantStore.isCredTypeActive(props.credentialType);
+});
+
+const isResolvable = computed<boolean>(() => {
+	return Boolean(props.credentialData.isResolvable);
+});
+
+const isDynamicCredentialsEnabled = computed<boolean>(() => {
+	return checkEnvFeatureFlag.value('DYNAMIC_CREDENTIALS');
 });
 
 function onDataChange(event: IUpdateInformation): void {
@@ -306,7 +319,9 @@ watch(showOAuthSuccessBanner, (newValue, oldValue) => {
 				@click="$emit('retest')"
 			/>
 
-			<template v-if="credentialPermissions.update">
+			<template
+				v-if="(credentialPermissions.create && isNewCredential) || credentialPermissions.update"
+			>
 				<N8nNotice v-if="documentationUrl && credentialProperties.length" theme="warning">
 					{{ i18n.baseText('credentialEdit.credentialConfig.needHelpFillingOutTheseFields') }}
 					<span class="ml-4xs">
@@ -363,7 +378,10 @@ watch(showOAuthSuccessBanner, (newValue, oldValue) => {
 			</EnterpriseEdition>
 
 			<CredentialInputs
-				v-if="credentialType && credentialPermissions.update"
+				v-if="
+					credentialType &&
+					((credentialPermissions.create && isNewCredential) || credentialPermissions.update)
+				"
 				:credential-data="credentialData"
 				:credential-properties="credentialProperties"
 				:documentation-url="documentationUrl"
@@ -376,7 +394,7 @@ watch(showOAuthSuccessBanner, (newValue, oldValue) => {
 					isOAuthType &&
 					requiredPropertiesFilled &&
 					!isOAuthConnected &&
-					credentialPermissions.update
+					((credentialPermissions.create && isNewCredential) || credentialPermissions.update)
 				"
 				:is-google-o-auth-type="isGoogleOAuthType"
 				data-test-id="oauth-connect-button"
@@ -397,6 +415,52 @@ watch(showOAuthSuccessBanner, (newValue, oldValue) => {
 					</N8nInfoTip>
 				</template>
 			</EnterpriseEdition>
+
+			<div
+				v-if="
+					isDynamicCredentialsEnabled &&
+					((credentialPermissions.create && isNewCredential) || credentialPermissions.update)
+				"
+				:class="$style.dynamicCredentials"
+				data-test-id="dynamic-credentials-section"
+			>
+				<div :class="$style.dynamicCredentialsHeader">
+					<N8nText size="medium" weight="bold">
+						{{ i18n.baseText('credentialEdit.credentialConfig.dynamicCredentials.title') }}
+					</N8nText>
+					<N8nTooltip placement="top">
+						<template #content>
+							<div>
+								{{ i18n.baseText('credentialEdit.credentialConfig.dynamicCredentials.infoTip') }}
+							</div>
+						</template>
+						<N8nIcon icon="circle-help" size="small" />
+					</N8nTooltip>
+				</div>
+				<ElSwitch
+					:model-value="isResolvable"
+					data-test-id="dynamic-credentials-toggle"
+					@update:model-value="onDataChange({ name: 'isResolvable', value: $event })"
+				/>
+				<div :class="$style.dynamicCredentialsDescription">
+					<N8nText :tag="'div'" size="small" color="text-light">
+						{{ i18n.baseText('credentialEdit.credentialConfig.dynamicCredentials.description1') }}
+					</N8nText>
+					<N8nText size="small" color="text-light">
+						{{ i18n.baseText('credentialEdit.credentialConfig.dynamicCredentials.description2') }}
+						<N8nLink
+							:to="i18n.baseText('credentialEdit.credentialConfig.dynamicCredentials.docsUrl')"
+							size="small"
+							theme="text"
+							underline
+						>
+							{{
+								i18n.baseText('credentialEdit.credentialConfig.dynamicCredentials.documentation')
+							}}
+						</N8nLink>
+					</N8nText>
+				</div>
+			</div>
 		</div>
 	</div>
 </template>
@@ -423,5 +487,23 @@ watch(showOAuthSuccessBanner, (newValue, oldValue) => {
 		margin-left: var(--spacing--3xs);
 		font-size: var(--font-size--sm);
 	}
+}
+
+.dynamicCredentials {
+	display: flex;
+	flex-direction: column;
+	gap: var(--spacing--xs);
+	padding-top: var(--spacing--lg);
+	border-top: var(--border);
+}
+
+.dynamicCredentialsHeader {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing--3xs);
+}
+
+.dynamicCredentialsDescription {
+	margin-top: var(--spacing--2xs);
 }
 </style>

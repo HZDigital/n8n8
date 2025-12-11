@@ -2,16 +2,16 @@
 import { reactive, ref, onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 
-import { useToast } from '@/composables/useToast';
+import { useToast } from '@/app/composables/useToast';
 import { useI18n } from '@n8n/i18n';
 
-import { useSettingsStore } from '@/stores/settings.store';
+import { useSettingsStore } from '@/app/stores/settings.store';
 import { useUsersStore } from '@/features/settings/users/users.store';
 import { useSSOStore } from '@/features/settings/sso/sso.store';
-import { getAzureAdTokenFromQuery } from '@/composables/useAzureAdToken';
+import { getAzureAdTokenFromQuery } from '@/app/composables/useAzureAdToken';
 
 import type { IFormBoxConfig } from '@/Interface';
-import { VIEWS } from '@/constants';
+import { VIEWS } from '@/app/constants';
 
 import AuthView from './AuthView.vue';
 

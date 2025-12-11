@@ -58,19 +58,20 @@ import {
 	AI_WORKFLOW_TOOL_LANGCHAIN_NODE_TYPE,
 	HUMAN_IN_THE_LOOP_CATEGORY,
 	TEMPLATE_CATEGORY_AI,
-} from '@/constants';
+	DATA_TABLE_NODE_TYPE,
+} from '@/app/constants';
 import { useI18n } from '@n8n/i18n';
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import type { SimplifiedNodeType } from '@/Interface';
 import type { INodeTypeDescription, NodeConnectionType, Themed } from 'n8n-workflow';
 import { EVALUATION_TRIGGER_NODE_TYPE, NodeConnectionTypes } from 'n8n-workflow';
 import { useTemplatesStore } from '@/features/workflows/templates/templates.store';
 import type { BaseTextKey } from '@n8n/i18n';
 import camelCase from 'lodash/camelCase';
-import { useSettingsStore } from '@/stores/settings.store';
+import { useSettingsStore } from '@/app/stores/settings.store';
 import { useEvaluationStore } from '@/features/ai/evaluation.ee/evaluation.store';
 import { getAiTemplatesCallout, getPreBuiltAgentsCalloutWithDivider } from '../nodeCreator.utils';
-import { useCalloutHelpers } from '@/composables/useCalloutHelpers';
+import { useCalloutHelpers } from '@/app/composables/useCalloutHelpers';
 
 export interface NodeViewItemSection {
 	key: string;
@@ -495,6 +496,7 @@ export function RegularView(nodes: SimplifiedNodeType[]) {
 	const popularItemsSubcategory = [
 		SET_NODE_TYPE,
 		CODE_NODE_TYPE,
+		DATA_TABLE_NODE_TYPE,
 		DATETIME_NODE_TYPE,
 		AI_TRANSFORM_NODE_TYPE,
 	];
@@ -590,7 +592,12 @@ export function RegularView(nodes: SimplifiedNodeType[]) {
 						{
 							key: 'popular',
 							title: i18n.baseText('nodeCreator.sectionNames.popular'),
-							items: [HTTP_REQUEST_NODE_TYPE, WEBHOOK_NODE_TYPE, CODE_NODE_TYPE],
+							items: [
+								HTTP_REQUEST_NODE_TYPE,
+								WEBHOOK_NODE_TYPE,
+								CODE_NODE_TYPE,
+								DATA_TABLE_NODE_TYPE,
+							],
 						},
 					],
 				},

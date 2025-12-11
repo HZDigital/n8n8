@@ -23,14 +23,15 @@ import type {
 import { getPersonalizedNodeTypes } from './users.utils';
 import { defineStore } from 'pinia';
 import { useRootStore } from '@n8n/stores/useRootStore';
-import { useUIStore } from '@/stores/ui.store';
+import { useUIStore } from '@/app/stores/ui.store';
 import * as mfaApi from '@n8n/rest-api-client/api/mfa';
 import * as cloudApi from '@n8n/rest-api-client/api/cloudPlans';
 import * as invitationsApi from './invitation.api';
 import { computed, ref } from 'vue';
-import { useSettingsStore } from '@/stores/settings.store';
-import * as onboardingApi from '@/api/workflow-webhooks';
+import { useSettingsStore } from '@/app/stores/settings.store';
+import * as onboardingApi from '@/app/api/workflow-webhooks';
 import * as promptsApi from '@n8n/rest-api-client/api/prompts';
+import { hasPermission } from '@/app/utils/rbac/permissions';
 
 const _isPendingUser = (user: IUserResponse | null) => !!user?.isPending;
 const _isInstanceOwner = (user: IUserResponse | null) => user?.role === ROLE.Owner;
@@ -169,13 +170,9 @@ export const useUsersStore = defineStore(STORES.USERS, () => {
 		await setCurrentUser(user);
 	};
 
-	const initialize = async (options: { quota?: number } = {}) => {
+	const initialize = async () => {
 		if (initialized.value) {
 			return;
-		}
-
-		if (typeof options.quota !== 'undefined') {
-			userQuota.value = options.quota;
 		}
 
 		try {
@@ -324,6 +321,10 @@ export const useUsersStore = defineStore(STORES.USERS, () => {
 	};
 
 	const fetchUsers = async () => {
+		if (!hasPermission(['rbac'], { rbac: { scope: 'user:list' } })) {
+			return;
+		}
+
 		const { items } = await usersApi.getUsers(rootStore.restApiContext, { take: -1, skip: 0 });
 		addUsers(items);
 	};
@@ -439,6 +440,12 @@ export const useUsersStore = defineStore(STORES.USERS, () => {
 		{ immediate: false, resetOnExecute: false },
 	);
 
+	const setUserQuota = (quota?: number) => {
+		if (typeof quota !== 'undefined') {
+			userQuota.value = quota;
+		}
+	};
+
 	return {
 		initialized,
 		currentUserId,
@@ -495,6 +502,7 @@ export const useUsersStore = defineStore(STORES.USERS, () => {
 		setCalloutDismissed,
 		submitContactEmail,
 		submitContactInfo,
+		setUserQuota,
 		usersList,
 	};
 });

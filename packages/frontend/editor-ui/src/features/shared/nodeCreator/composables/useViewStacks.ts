@@ -16,7 +16,7 @@ import {
 	AI_SUBCATEGORY,
 	DEFAULT_SUBCATEGORY,
 	TRIGGER_NODE_CREATOR_VIEW,
-} from '@/constants';
+} from '@/app/constants';
 import { defineStore } from 'pinia';
 import { v4 as uuid } from 'uuid';
 import { computed, nextTick, ref } from 'vue';
@@ -25,7 +25,7 @@ import difference from 'lodash/difference';
 import { useNodeCreatorStore } from '@/features/shared/nodeCreator/nodeCreator.store';
 
 import {
-	extendItemsWithUUID,
+	finalizeItems,
 	flattenCreateElements,
 	groupItemsInSections,
 	isAINode,
@@ -40,11 +40,11 @@ import { AINodesView } from '../views/viewsData';
 import { useI18n } from '@n8n/i18n';
 import { useKeyboardNavigation } from './useKeyboardNavigation';
 
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import { AI_TRANSFORM_NODE_TYPE } from 'n8n-workflow';
 import type { NodeConnectionType, INodeInputFilter } from 'n8n-workflow';
-import { useCanvasStore } from '@/stores/canvas.store';
-import { useSettingsStore } from '@/stores/settings.store';
+import { useCanvasStore } from '@/app/stores/canvas.store';
+import { useSettingsStore } from '@/app/stores/settings.store';
 
 export type CommunityNodeDetails = {
 	key: string;
@@ -57,9 +57,9 @@ export type CommunityNodeDetails = {
 	nodeIcon?: NodeIconSource;
 };
 
-import { useUIStore } from '@/stores/ui.store';
-import { type NodeIconSource } from '@/utils/nodeIcon';
-import { getThemedValue } from '@/utils/nodeTypesUtils';
+import { useUIStore } from '@/app/stores/ui.store';
+import { type NodeIconSource } from '@/app/utils/nodeIcon';
+import { getThemedValue } from '@/app/utils/nodeTypesUtils';
 
 import nodePopularity from 'virtual:node-popularity-data';
 
@@ -109,7 +109,7 @@ export const useViewStacks = defineStore('nodeCreatorViewStacks', () => {
 		const stack = getLastActiveStack();
 
 		if (!stack?.baselineItems) {
-			return stack.items ? extendItemsWithUUID(stack.items) : [];
+			return stack.items ? finalizeItems(stack.items) : [];
 		}
 
 		if (stack.search && searchBaseItems.value) {
@@ -130,7 +130,7 @@ export const useViewStacks = defineStore('nodeCreatorViewStacks', () => {
 				searchBase = filterOutAiNodes(searchBase);
 			}
 
-			const searchResults = extendItemsWithUUID(
+			const searchResults = finalizeItems(
 				searchNodes(stack.search || '', searchBase, {
 					popularity: nodePopularityMap,
 				}),
@@ -143,7 +143,7 @@ export const useViewStacks = defineStore('nodeCreatorViewStacks', () => {
 
 			return groupedNodes;
 		}
-		return extendItemsWithUUID(groupIfAiNodes(stack.baselineItems, stack.title, true));
+		return finalizeItems(groupIfAiNodes(stack.baselineItems, stack.title, true));
 	});
 
 	const activeViewStack = computed<ViewStack>(() => {
@@ -193,7 +193,7 @@ export const useViewStacks = defineStore('nodeCreatorViewStacks', () => {
 		// Apply filtering for AI nodes if the current view is not the AI root view
 		const filteredNodes = isAiRootView(stack) ? allNodes : filterOutAiNodes(allNodes);
 
-		let globalSearchResult: INodeCreateElement[] = extendItemsWithUUID(
+		let globalSearchResult: INodeCreateElement[] = finalizeItems(
 			searchNodes(stack.search || '', filteredNodes, {
 				popularity: nodePopularityMap,
 			}),

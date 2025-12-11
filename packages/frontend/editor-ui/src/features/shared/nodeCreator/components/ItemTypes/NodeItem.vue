@@ -5,18 +5,18 @@ import {
 	DEFAULT_SUBCATEGORY,
 	DRAG_EVENT_DATA_KEY,
 	HITL_SUBCATEGORY,
-} from '@/constants';
+} from '@/app/constants';
 import { COMMUNITY_NODES_INSTALLATION_DOCS_URL } from '@/features/settings/communityNodes/communityNodes.constants';
 import { computed, ref } from 'vue';
 
-import NodeIcon from '@/components/NodeIcon.vue';
+import NodeIcon from '@/app/components/NodeIcon.vue';
 import { useNodeCreatorStore } from '@/features/shared/nodeCreator/nodeCreator.store';
 import { isCommunityPackageName } from 'n8n-workflow';
 import OfficialIcon from 'virtual:icons/mdi/verified';
 
-import { useNodeType } from '@/composables/useNodeType';
-import { useTelemetry } from '@/composables/useTelemetry';
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
+import { useNodeType } from '@/app/composables/useNodeType';
+import { useTelemetry } from '@/app/composables/useTelemetry';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import { useI18n } from '@n8n/i18n';
 import { useActions } from '../../composables/useActions';
 import { useViewStacks } from '../../composables/useViewStacks';
@@ -130,7 +130,7 @@ const author = computed(() => {
 
 const tag = computed(() => {
 	if (props.nodeType.tag) {
-		return { text: props.nodeType.tag };
+		return props.nodeType.tag;
 	}
 	if (description.value.toLowerCase().includes('deprecated')) {
 		return { text: i18n.baseText('nodeCreator.nodeItem.deprecated'), type: 'info' };

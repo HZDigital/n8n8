@@ -1,13 +1,13 @@
 <script lang="ts" setup>
 import ProjectCardBadge from '@/features/collaboration/projects/components/ProjectCardBadge.vue';
-import { useLoadingService } from '@/composables/useLoadingService';
-import { useTelemetry } from '@/composables/useTelemetry';
-import { useToast } from '@/composables/useToast';
-import { VIEWS } from '@/constants';
+import { useLoadingService } from '@/app/composables/useLoadingService';
+import { useTelemetry } from '@/app/composables/useTelemetry';
+import { useToast } from '@/app/composables/useToast';
+import { VIEWS } from '@/app/constants';
 import { SOURCE_CONTROL_PUSH_MODAL_KEY } from '../sourceControl.constants';
 import type { WorkflowResource } from '@/Interface';
 import { useProjectsStore } from '@/features/collaboration/projects/projects.store';
-import { useSettingsStore } from '@/stores/settings.store';
+import { useSettingsStore } from '@/app/stores/settings.store';
 import { useSourceControlStore } from '../sourceControl.store';
 import { useUsersStore } from '@/features/settings/users/users.store';
 import type {
@@ -16,7 +16,7 @@ import type {
 } from '@/features/collaboration/projects/projects.types';
 import { ResourceType } from '@/features/collaboration/projects/projects.utils';
 import { getPushPriorityByStatus, getStatusText, getStatusTheme } from '../sourceControl.utils';
-import type { SourceControlledFile } from '@n8n/api-types';
+import type { SourceControlledFile, SourceControlledFileStatus } from '@n8n/api-types';
 import {
 	ROLE,
 	SOURCE_CONTROL_FILE_LOCATION,
@@ -32,7 +32,7 @@ import { computed, onBeforeMount, onMounted, reactive, ref, toRaw, watch, watchE
 import { useRoute, useRouter } from 'vue-router';
 import { DynamicScroller, DynamicScrollerItem } from 'vue-virtual-scroller';
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
-import Modal from '@/components/Modal.vue';
+import Modal from '@/app/components/Modal.vue';
 import ProjectSharing from '@/features/collaboration/projects/components/ProjectSharing.vue';
 import {
 	N8nBadge,
@@ -133,8 +133,6 @@ const projectsForFilters = computed(() => {
 
 const concatenateWithAnd = (messages: string[]) =>
 	new Intl.ListFormat(i18n.locale, { style: 'long', type: 'conjunction' }).format(messages);
-
-type SourceControlledFileStatus = SourceControlledFile['status'];
 
 type SourceControlledFileWithProject = SourceControlledFile & { project?: ProjectListItem };
 
@@ -654,6 +652,7 @@ function castProject(project: ProjectListItem): WorkflowResource {
 		id: '',
 		name: '',
 		active: false,
+		activeVersionId: null,
 		createdAt: '',
 		updatedAt: '',
 		isArchived: false,
@@ -664,7 +663,7 @@ function castProject(project: ProjectListItem): WorkflowResource {
 	return resource;
 }
 
-function openDiffModal(id: string) {
+function openDiffModal(id: string, workflowStatus: SourceControlledFileStatus) {
 	telemetry.track('User clicks compare workflows', {
 		workflow_id: id,
 		context: 'source_control_push',
@@ -675,6 +674,7 @@ function openDiffModal(id: string) {
 		query: {
 			...route.query,
 			diff: id,
+			workflowStatus,
 			direction: 'push',
 		},
 	});
@@ -928,9 +928,10 @@ onMounted(async () => {
 														placement="top"
 													>
 														<N8nIconButton
+															data-test-id="source-control-workflow-diff-button"
 															icon="file-diff"
 															type="secondary"
-															@click="openDiffModal(file.id)"
+															@click="openDiffModal(file.id, file.status)"
 														/>
 													</N8nTooltip>
 												</template>

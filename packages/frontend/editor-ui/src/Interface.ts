@@ -32,6 +32,7 @@ import type {
 	ITaskData,
 	ISourceData,
 	PublicInstalledPackage,
+	IDestinationNode,
 } from 'n8n-workflow';
 import type { Version } from '@n8n/rest-api-client/api/versions';
 import type { Cloud, InstanceUsage } from '@n8n/rest-api-client/api/cloudPlans';
@@ -50,9 +51,9 @@ import type {
 	AI_OTHERS_NODE_CREATOR_VIEW,
 	AI_UNCATEGORIZED_CATEGORY,
 	AI_EVALUATION,
-} from '@/constants';
+} from '@/app/constants';
 import type { CREDENTIAL_EDIT_MODAL_KEY } from '@/features/credentials/credentials.constants';
-import type { BulkCommand, Undoable } from '@/models/history';
+import type { BulkCommand, Undoable } from '@/app/models/history';
 
 import type { ProjectSharingData } from '@/features/collaboration/projects/projects.types';
 import type { IconName } from '@n8n/design-system/src/components/N8nIcon/icons';
@@ -61,6 +62,7 @@ import type {
 	FolderListItem,
 	ResourceParentFolder,
 } from '@/features/core/folders/folders.types';
+import type { WorkflowHistory } from '@n8n/rest-api-client/api/workflowHistory';
 
 export * from '@n8n/design-system/types';
 
@@ -183,7 +185,7 @@ export interface IAiDataContent {
 export interface IStartRunData {
 	workflowData: WorkflowData;
 	startNodes?: StartNodeData[];
-	destinationNode?: string;
+	destinationNode?: IDestinationNode;
 	runData?: IRunData;
 	dirtyNodeNames?: string[];
 	triggerToStartFrom?: {
@@ -235,6 +237,7 @@ export interface INewWorkflowData {
 export interface IWorkflowDb {
 	id: string;
 	name: string;
+	description?: string | null;
 	active: boolean;
 	isArchived: boolean;
 	createdAt: number | string;
@@ -248,6 +251,7 @@ export interface IWorkflowDb {
 	homeProject?: ProjectSharingData;
 	scopes?: Scope[];
 	versionId: string;
+	activeVersionId: string | null;
 	usedCredentials?: IUsedCredential[];
 	meta?: WorkflowMetadata;
 	parentFolder?: {
@@ -257,6 +261,8 @@ export interface IWorkflowDb {
 		createdAt?: string;
 		updatedAt?: string;
 	};
+	activeVersion?: WorkflowHistory | null;
+	checksum?: string;
 }
 
 // For workflow list we don't need the full workflow data
@@ -271,9 +277,11 @@ export type FolderResource = BaseFolderItem & {
 
 export type WorkflowResource = BaseResource & {
 	resourceType: 'workflow';
+	description?: string;
 	updatedAt: string;
 	createdAt: string;
 	active: boolean;
+	activeVersionId: string | null;
 	isArchived: boolean;
 	homeProject?: ProjectSharingData;
 	scopes?: Scope[];
@@ -301,6 +309,7 @@ export type CredentialsResource = BaseResource & {
 	sharedWithProjects?: ProjectSharingData[];
 	readOnly: boolean;
 	needsSetup: boolean;
+	isGlobal?: boolean;
 };
 
 // Base resource types that are always available
@@ -334,6 +343,7 @@ export type WorkflowListItem = Omit<
 	'nodes' | 'connections' | 'pinData' | 'usedCredentials' | 'meta'
 > & {
 	resource: 'workflow';
+	description?: string;
 };
 
 export type WorkflowListResource = WorkflowListItem | FolderListItem;
@@ -343,6 +353,7 @@ export interface IWorkflowShortResponse {
 	id: string;
 	name: string;
 	active: boolean;
+	activeVersionId: string | null;
 	createdAt: number | string;
 	updatedAt: number | string;
 	tags: ITag[];
@@ -441,7 +452,7 @@ export type SimplifiedNodeType = Pick<
 	| 'defaults'
 	| 'outputs'
 > & {
-	tag?: string;
+	tag?: NodeCreatorTag;
 };
 export interface SubcategoryItemProps {
 	description?: string;
@@ -585,16 +596,6 @@ export interface SubcategorizedNodeTypes {
 	[subcategory: string]: INodeCreateElement[];
 }
 
-export interface ITagRow {
-	tag?: ITag;
-	usage?: string;
-	create?: boolean;
-	disable?: boolean;
-	update?: boolean;
-	delete?: boolean;
-	canDelete?: boolean;
-}
-
 export interface INodeMetadata {
 	parametersLastUpdatedAt?: number;
 	pinnedDataLastUpdatedAt?: number;
@@ -608,13 +609,6 @@ export interface NodeMetadataMap {
 
 export interface CommunityPackageMap {
 	[name: string]: PublicInstalledPackage;
-}
-
-export interface ITagsState {
-	tags: { [id: string]: ITag };
-	loading: boolean;
-	fetchedAll: boolean;
-	fetchedUsageCount: boolean;
 }
 
 export type Modals = {
@@ -775,6 +769,7 @@ export interface ITabBarItem {
 export interface IResourceLocatorResultExpanded extends INodeListSearchItems {
 	linkAlt?: string;
 	isArchived?: boolean;
+	active?: boolean;
 }
 
 export interface CurlToJSONResponse {
@@ -854,11 +849,11 @@ export type CloudUpdateLinkSourceType =
 	| 'evaluations'
 	| 'ai-builder-sidebar'
 	| 'ai-builder-canvas'
-	| 'custom-roles';
+	| 'custom-roles'
+	| 'main-sidebar';
 
 export type UTMCampaign =
 	| 'upgrade-custom-data-filter'
-	| 'upgrade-canvas-nav'
 	| 'upgrade-concurrency'
 	| 'upgrade-workflow-sharing'
 	| 'upgrade-credentials-sharing'
@@ -881,12 +876,15 @@ export type UTMCampaign =
 	| 'upgrade-insights'
 	| 'upgrade-evaluations'
 	| 'upgrade-builder'
-	| 'upgrade-custom-roles';
+	| 'upgrade-custom-roles'
+	| 'upgrade-canvas-nav'
+	| 'upgrade-main-sidebar';
 
 export type AddedNode = {
 	type: string;
 	openDetail?: boolean;
 	isAutoAdd?: boolean;
+	positionOffset?: XYPosition;
 	actionName?: string;
 } & Partial<INodeUi>;
 
@@ -923,7 +921,6 @@ export type EnterpriseEditionFeatureKey =
 	| 'ExternalSecrets'
 	| 'AuditLogs'
 	| 'DebugInEditor'
-	| 'WorkflowHistory'
 	| 'WorkerView'
 	| 'AdvancedPermissions'
 	| 'ApiKeyScopes'

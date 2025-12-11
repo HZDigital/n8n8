@@ -114,7 +114,6 @@ export const useSSOStore = defineStore('sso', () => {
 		get: () => saml.value.loginEnabled,
 		set: (value: boolean) => {
 			saml.value.loginEnabled = value;
-			void toggleLoginEnabled(value);
 		},
 	});
 
@@ -124,14 +123,13 @@ export const useSSOStore = defineStore('sso', () => {
 		() => authenticationMethod.value === UserManagementAuthenticationMethod.Saml,
 	);
 
-	const toggleLoginEnabled = async (enabled: boolean) =>
-		await ssoApi.toggleSamlConfig(rootStore.restApiContext, { loginEnabled: enabled });
-
 	const getSamlMetadata = async () => await ssoApi.getSamlMetadata(rootStore.restApiContext);
 
 	const getSamlConfig = async () => {
 		const config = await ssoApi.getSamlConfig(rootStore.restApiContext);
 		samlConfig.value = config;
+		saml.value.loginEnabled = config.loginEnabled;
+		saml.value.loginLabel = config.loginLabel;
 		return config;
 	};
 

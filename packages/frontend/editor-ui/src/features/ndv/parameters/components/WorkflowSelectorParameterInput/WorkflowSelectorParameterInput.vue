@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ComponentInstance } from 'vue';
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
-import { useWorkflowsStore } from '@/stores/workflows.store';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
 import type { EventBus } from '@n8n/utils/event-bus';
 import { createEventBus } from '@n8n/utils/event-bus';
 import type {
@@ -11,7 +11,7 @@ import type {
 	ResourceLocatorModes,
 } from 'n8n-workflow';
 import { useI18n } from '@n8n/i18n';
-import DraggableTarget from '@/components/DraggableTarget.vue';
+import DraggableTarget from '@/app/components/DraggableTarget.vue';
 import ExpressionParameterInput from '../ExpressionParameterInput.vue';
 import ResourceLocatorDropdown from '../ResourceLocator/ResourceLocatorDropdown.vue';
 import ParameterIssues from '../ParameterIssues.vue';
@@ -21,14 +21,25 @@ import { useWorkflowResourceLocatorDropdown } from '../../composables/useWorkflo
 import { useWorkflowResourceLocatorModes } from '../../composables/useWorkflowResourceLocatorModes';
 import { useWorkflowResourcesLocator } from '../../composables/useWorkflowResourcesLocator';
 import { useProjectsStore } from '@/features/collaboration/projects/projects.store';
-import { useTelemetry } from '@/composables/useTelemetry';
-import { VIEWS } from '@/constants';
-import { SAMPLE_SUBWORKFLOW_TRIGGER_ID, SAMPLE_SUBWORKFLOW_WORKFLOW } from '@/constants/samples';
+import { useTelemetry } from '@/app/composables/useTelemetry';
+import { VIEWS } from '@/app/constants';
+import {
+	SAMPLE_SUBWORKFLOW_TRIGGER_ID,
+	SAMPLE_SUBWORKFLOW_WORKFLOW,
+} from '@/app/constants/samples';
 import type { WorkflowDataCreate } from '@n8n/rest-api-client/api/workflows';
-import { useDocumentVisibility } from '@/composables/useDocumentVisibility';
-import { useToast } from '@/composables/useToast';
+import { useDocumentVisibility } from '@/app/composables/useDocumentVisibility';
+import { useToast } from '@/app/composables/useToast';
 
-import { N8nIcon, N8nInput, N8nLink, N8nOption, N8nSelect, N8nText } from '@n8n/design-system';
+import {
+	N8nIcon,
+	N8nInput,
+	N8nLink,
+	N8nOption,
+	N8nSelect,
+	N8nText,
+	N8nTooltip,
+} from '@n8n/design-system';
 export interface Props {
 	modelValue: INodeParameterResourceLocator;
 	eventBus?: EventBus;
@@ -330,6 +341,7 @@ const onAddResourceClicked = async () => {
 			:width="width"
 			:event-bus="eventBus"
 			:model-value="modelValue"
+			:disable-inactive-items="true"
 			@update:model-value="onListItemSelected"
 			@filter="onSearchFilter"
 			@load-more="populateNextWorkflowsPage"
@@ -341,6 +353,22 @@ const onAddResourceClicked = async () => {
 						{{ i18n.baseText('resourceLocator.mode.list.error.title') }}
 					</N8nText>
 				</div>
+			</template>
+			<template #item-badge="{ item, isHovered }">
+				<N8nTooltip
+					v-if="!item.active && isHovered"
+					:content="i18n.baseText('resourceLocator.workflow.inactive.tooltip')"
+					placement="top"
+				>
+					<span
+						:class="[
+							$style.inactiveBadge,
+							!item.isArchived ? $style.inactiveBadgeAlone : $style.inactiveBadgeWithArchived,
+						]"
+					>
+						<N8nIcon icon="triangle-alert" size="small" data-test-id="workflow-inactive-icon" />
+					</span>
+				</N8nTooltip>
 			</template>
 			<div
 				:class="{
@@ -460,4 +488,18 @@ const onAddResourceClicked = async () => {
 
 <style lang="scss" module>
 @use '../ResourceLocator/resourceLocator.scss';
+
+.inactiveBadge {
+	display: inline-flex;
+	align-items: center;
+	color: var(--color--warning);
+}
+
+.inactiveBadgeAlone {
+	margin-left: auto;
+}
+
+.inactiveBadgeWithArchived {
+	margin-left: var(--spacing--3xs);
+}
 </style>

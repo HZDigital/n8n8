@@ -2,6 +2,7 @@ import type { LicenseProvider } from '@n8n/backend-common';
 import { Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
 import {
+	DEFAULT_WORKFLOW_HISTORY_PRUNE_LIMIT,
 	LICENSE_FEATURES,
 	LICENSE_QUOTAS,
 	Time,
@@ -29,11 +30,15 @@ export type FeatureReturnType = Partial<
 	} & { [K in NumericLicenseFeature]: number } & { [K in BooleanLicenseFeature]: boolean }
 >;
 
+type LicenseRefreshCallback = (cert: string) => void;
+
 @Service()
 export class License implements LicenseProvider {
 	private manager: LicenseManager | undefined;
 
 	private isShuttingDown = false;
+
+	private refreshCallbacks: LicenseRefreshCallback[] = [];
 
 	constructor(
 		private readonly logger: Logger,
@@ -161,10 +166,12 @@ export class License implements LicenseProvider {
 
 	private async onFeatureChange() {
 		void this.broadcastReloadLicenseCommand();
+		await this.notifyRefreshCallbacks();
 	}
 
 	private async onLicenseRenewed() {
 		void this.broadcastReloadLicenseCommand();
+		await this.notifyRefreshCallbacks();
 	}
 
 	private async broadcastReloadLicenseCommand() {
@@ -187,6 +194,31 @@ export class License implements LicenseProvider {
 		);
 	}
 
+	/**
+	 * Register a callback to be notified when license certificate is refreshed.
+	 * Returns an unsubscribe function.
+	 */
+	onCertRefresh(refreshCallback: LicenseRefreshCallback): () => void {
+		this.refreshCallbacks.push(refreshCallback);
+		return () => {
+			const index = this.refreshCallbacks.indexOf(refreshCallback);
+			if (index > -1) {
+				this.refreshCallbacks.splice(index, 1);
+			}
+		};
+	}
+
+	private async notifyRefreshCallbacks(): Promise<void> {
+		const cert = await this.loadCertStr();
+		for (const refreshCallback of this.refreshCallbacks) {
+			try {
+				refreshCallback(cert);
+			} catch (error) {
+				this.logger.error('Error in license refresh callback', { error });
+			}
+		}
+	}
+
 	async activate(activationKey: string, eulaUri?: string): Promise<void> {
 		if (!this.manager) {
 			return;
@@ -202,6 +234,7 @@ export class License implements LicenseProvider {
 			return;
 		}
 		await this.manager.reload();
+		await this.notifyRefreshCallbacks();
 		this.logger.debug('License reloaded');
 	}
 
@@ -247,6 +280,11 @@ export class License implements LicenseProvider {
 		}
 
 		return this.manager?.hasFeatureEnabled(feature) ?? false;
+	}
+
+	/** @deprecated Use `LicenseState.isDynamicCredentialsLicensed` instead. */
+	isDynamicCredentialsEnabled() {
+		return this.isLicensed(LICENSE_FEATURES.DYNAMIC_CREDENTIALS);
 	}
 
 	/** @deprecated Use `LicenseState.isSharingLicensed` instead. */
@@ -327,11 +365,6 @@ export class License implements LicenseProvider {
 	/** @deprecated Use `LicenseState.isExternalSecretsLicensed` instead. */
 	isExternalSecretsEnabled() {
 		return this.isLicensed(LICENSE_FEATURES.EXTERNAL_SECRETS);
-	}
-
-	/** @deprecated Use `LicenseState.isWorkflowHistoryLicensed` instead. */
-	isWorkflowHistoryLicensed() {
-		return this.isLicensed(LICENSE_FEATURES.WORKFLOW_HISTORY);
 	}
 
 	/** @deprecated Use `LicenseState.isAPIDisabled` instead. */
@@ -432,7 +465,10 @@ export class License implements LicenseProvider {
 
 	/** @deprecated Use `LicenseState` instead. */
 	getWorkflowHistoryPruneLimit() {
-		return this.getValue(LICENSE_QUOTAS.WORKFLOW_HISTORY_PRUNE_LIMIT) ?? UNLIMITED_LICENSE_QUOTA;
+		return (
+			this.getValue(LICENSE_QUOTAS.WORKFLOW_HISTORY_PRUNE_LIMIT) ??
+			DEFAULT_WORKFLOW_HISTORY_PRUNE_LIMIT
+		);
 	}
 
 	/** @deprecated Use `LicenseState` instead. */

@@ -1,0 +1,28 @@
+diff --git a/build/assert.js b/build/assert.js
+index 1234567..abcdefg 100644
+--- a/build/assert.js
++++ b/build/assert.js
+@@ -37,10 +37,10 @@ var _require$codes = require('./internal/errors').codes,
+   ERR_MISSING_ARGS = _require$codes.ERR_MISSING_ARGS;
+ var AssertionError = require('./internal/assert/assertion_error');
+-var _require2 = require('util/'),
++var _require2 = require('util'),
+   inspect = _require2.inspect;
+-var _require$types = require('util/').types,
++var _require$types = require('util').types,
+   isPromise = _require$types.isPromise,
+   isRegExp = _require$types.isRegExp;
+ var _require2 = require('./internal/util/comparisons'),
+diff --git a/build/internal/errors.js b/build/internal/errors.js
+index 1234567..abcdefg 100644
+--- a/build/internal/errors.js
++++ b/build/internal/errors.js
+@@ -127,7 +127,7 @@ function E(sym, val, def, ...args) {
+   }
+
+   function inspected(orig, other) {
+-    if (util === undefined) util = require('util/');
++    if (util === undefined) util = require('util');
+     return util.inspect(orig) !== util.inspect(other);
+   }
+ }

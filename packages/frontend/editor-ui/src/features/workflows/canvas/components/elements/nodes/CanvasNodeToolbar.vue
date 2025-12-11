@@ -4,8 +4,8 @@ import { useI18n } from '@n8n/i18n';
 import { useCanvasNode } from '../../../composables/useCanvasNode';
 import { CanvasNodeRenderType } from '../../../canvas.types';
 import { useCanvas } from '../../../composables/useCanvas';
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
-import { useWorkflowsStore } from '@/stores/workflows.store';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
 import { useExperimentalNdvStore } from '../../../experimental/experimentalNdv.store';
 import CanvasNodeStatusIcons from './render-types/parts/CanvasNodeStatusIcons.vue';
 
@@ -196,6 +196,7 @@ function onFocusNode() {
 	justify-content: flex-end;
 	width: 100%;
 	cursor: default;
+	pointer-events: none;
 
 	&.isExperimentalNdvActive {
 		justify-content: space-between;
@@ -213,6 +214,7 @@ function onFocusNode() {
 	justify-content: center;
 	background-color: var(--canvas--color--background);
 	border-radius: var(--radius);
+	pointer-events: auto;
 
 	:global(.button) {
 		--button--color--text: var(--color--text--tint-1);

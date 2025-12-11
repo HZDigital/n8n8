@@ -50,7 +50,7 @@ import {
 	parseFromExpression,
 	shouldSkipParamValidation,
 } from '@/features/ndv/shared/ndv.utils';
-import { hasExpressionMapping, isValueExpression } from '@/utils/nodeTypesUtils';
+import { hasExpressionMapping, isValueExpression } from '@/app/utils/nodeTypesUtils';
 
 import {
 	AI_TRANSFORM_NODE_TYPE,
@@ -60,45 +60,47 @@ import {
 	ExpressionLocalResolveContextSymbol,
 	HTML_NODE_TYPE,
 	NODES_USING_CODE_NODE_EDITOR,
-} from '@/constants';
+} from '@/app/constants';
 
-import { useDebounce } from '@/composables/useDebounce';
-import { useExternalHooks } from '@/composables/useExternalHooks';
+import { useDebounce } from '@/app/composables/useDebounce';
+import { useExternalHooks } from '@/app/composables/useExternalHooks';
 import { useI18n } from '@n8n/i18n';
-import { useNodeHelpers } from '@/composables/useNodeHelpers';
-import { useTelemetry } from '@/composables/useTelemetry';
-import { useWorkflowHelpers } from '@/composables/useWorkflowHelpers';
+import { useNodeHelpers } from '@/app/composables/useNodeHelpers';
+import { useTelemetry } from '@/app/composables/useTelemetry';
+import { useWorkflowHelpers } from '@/app/composables/useWorkflowHelpers';
 import { useNodeSettingsParameters } from '@/features/ndv/settings/composables/useNodeSettingsParameters';
-import { htmlEditorEventBus } from '@/event-bus';
+import { htmlEditorEventBus } from '@/app/event-bus';
 import { useCredentialsStore } from '@/features/credentials/credentials.store';
 import { useNDVStore } from '@/features/ndv/shared/ndv.store';
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
-import { useSettingsStore } from '@/stores/settings.store';
-import { useWorkflowsStore } from '@/stores/workflows.store';
-import { useUIStore } from '@/stores/ui.store';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
+import { useSettingsStore } from '@/app/stores/settings.store';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
+import { useUIStore } from '@/app/stores/ui.store';
 import type { EventBus } from '@n8n/utils/event-bus';
 import { createEventBus } from '@n8n/utils/event-bus';
 import { useElementSize } from '@vueuse/core';
 import { captureMessage } from '@sentry/vue';
-import { isCredentialOnlyNodeType } from '@/utils/credentialOnlyNodes';
+import { isCredentialOnlyNodeType } from '@/app/utils/credentialOnlyNodes';
 import {
 	hasFocusOnInput,
 	isBlurrableEl,
 	isEmpty,
 	isFocusableEl,
 	isSelectableEl,
-} from '@/utils/typesUtils';
-import { completeExpressionSyntax, shouldConvertToExpression } from '@/utils/expressions';
+} from '@/app/utils/typesUtils';
+import { completeExpressionSyntax, shouldConvertToExpression } from '@/app/utils/expressions';
 import CssEditor from '@/features/shared/editors/components/CssEditor/CssEditor.vue';
-import { useFocusPanelStore } from '@/stores/focusPanel.store';
+import { useFocusPanelStore } from '@/app/stores/focusPanel.store';
 import ExperimentalEmbeddedNdvMapper from '@/features/workflows/canvas/experimental/components/ExperimentalEmbeddedNdvMapper.vue';
 import { useExperimentalNdvStore } from '@/features/workflows/canvas/experimental/experimentalNdv.store';
 import { useProjectsStore } from '@/features/collaboration/projects/projects.store';
-import { getParameterDisplayableOptions } from '@/utils/nodes/nodeTransforms';
+import { getParameterDisplayableOptions } from '@/app/utils/nodes/nodeTransforms';
+import { useBuilderStore } from '@/features/ai/assistant/builder.store';
 
 import { ElColorPicker, ElDatePicker, ElDialog, ElSwitch } from 'element-plus';
 import { N8nIcon, N8nInput, N8nInputNumber, N8nOption, N8nSelect } from '@n8n/design-system';
-import { injectWorkflowState } from '@/composables/useWorkflowState';
+import { injectWorkflowState } from '@/app/composables/useWorkflowState';
+import { isPlaceholderValue } from '@/features/ai/assistant/composables/useBuilderTodos';
 type Picker = { $emit: (arg0: string, arg1: Date) => void };
 
 type Props = {
@@ -165,6 +167,7 @@ const uiStore = useUIStore();
 const focusPanelStore = useFocusPanelStore();
 const experimentalNdvStore = useExperimentalNdvStore();
 const projectsStore = useProjectsStore();
+const builderStore = useBuilderStore();
 
 const expressionLocalResolveCtx = inject(ExpressionLocalResolveContextSymbol, undefined);
 
@@ -251,7 +254,7 @@ const parameterOptions = computed(() => {
 	const safeOptions = (options ?? []).filter(isValidParameterOption);
 
 	// temporary until native Python runner is GA
-	if (props.parameter.name === 'language') {
+	if (props.parameter.name === 'language' && node.value?.type === 'n8n-nodes-base.code') {
 		if (settingsStore.isNativePythonRunnerEnabled) {
 			return safeOptions.filter((o) => o.value !== 'python');
 		} else {
@@ -801,6 +804,14 @@ function selectInput() {
 	}
 }
 
+function trackBuilderPlaceholders() {
+	if (node.value && isPlaceholderValue(props.modelValue) && builderStore.isAIBuilderEnabled) {
+		builderStore.trackWorkflowBuilderJourney('field_focus_placeholder_in_ndv', {
+			node_type: node.value.type,
+		});
+	}
+}
+
 async function setFocus() {
 	if (['json'].includes(props.parameter.type) && getTypeOption('alwaysOpenEditWindow')) {
 		displayEditDialog();
@@ -830,6 +841,7 @@ async function setFocus() {
 	}
 
 	emit('focus');
+	trackBuilderPlaceholders();
 }
 
 function rgbaToHex(value: string): string | null {
@@ -1644,8 +1656,8 @@ onUpdated(async () => {
 				v-else-if="parameter.type === 'dateTime'"
 				ref="inputField"
 				v-model="tempValue"
-				type="datetime"
-				value-format="YYYY-MM-DDTHH:mm:ss"
+				:type="getTypeOption('dateOnly') ? 'date' : 'datetime'"
+				:value-format="getTypeOption('dateOnly') ? 'YYYY-MM-DD' : 'YYYY-MM-DDTHH:mm:ss'"
 				:size="
 					inputSize === 'mini'
 						? 'small'
@@ -1658,7 +1670,9 @@ onUpdated(async () => {
 				:placeholder="
 					parameter.placeholder
 						? getPlaceholder()
-						: i18n.baseText('parameterInput.selectDateAndTime')
+						: getTypeOption('dateOnly')
+							? i18n.baseText('parameterInput.selectDate')
+							: i18n.baseText('parameterInput.selectDateAndTime')
 				"
 				:picker-options="dateTimePickerOptions"
 				:class="{ 'ph-no-capture': shouldRedactValue }"

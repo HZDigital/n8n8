@@ -1,15 +1,14 @@
 <script setup lang="ts">
 import { useI18n } from '@n8n/i18n';
-import { useTelemetry } from '@/composables/useTelemetry';
+import { useTelemetry } from '@/app/composables/useTelemetry';
 import {
 	CRON_NODE_TYPE,
 	INTERVAL_NODE_TYPE,
 	MANUAL_TRIGGER_NODE_TYPE,
-	NDV_UI_OVERHAUL_EXPERIMENT,
 	START_NODE_TYPE,
-} from '@/constants';
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
-import { useWorkflowsStore } from '@/stores/workflows.store';
+} from '@/app/constants';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
 import { waitingNodeTooltip } from '@/features/execution/executions/executions.utils';
 import uniqBy from 'lodash/uniqBy';
 import {
@@ -22,19 +21,18 @@ import {
 } from 'n8n-workflow';
 import { computed, ref, watch } from 'vue';
 import InputNodeSelect from './InputNodeSelect.vue';
-import NodeExecuteButton from '@/components/NodeExecuteButton.vue';
+import NodeExecuteButton from '@/app/components/NodeExecuteButton.vue';
 import NDVEmptyState from './NDVEmptyState.vue';
 import RunData from '@/features/ndv/runData/components/RunData.vue';
 import WireMeUp from './WireMeUp.vue';
-import { usePostHog } from '@/stores/posthog.store';
 import { type IRunDataDisplayMode } from '@/Interface';
 import { I18nT } from 'vue-i18n';
 import { type SearchShortcut } from '@/features/workflows/canvas/canvas.types';
 import { useRouter } from 'vue-router';
-import { useRunWorkflow } from '@/composables/useRunWorkflow';
+import { useRunWorkflow } from '@/app/composables/useRunWorkflow';
 
 import { N8nIcon, N8nRadioButtons, N8nText, N8nTooltip } from '@n8n/design-system';
-import { injectWorkflowState } from '@/composables/useWorkflowState';
+import { injectWorkflowState } from '@/app/composables/useWorkflowState';
 type MappingMode = 'debugging' | 'mapping';
 
 export type Props = {
@@ -105,7 +103,6 @@ const inputModes = [
 const nodeTypesStore = useNodeTypesStore();
 const workflowsStore = useWorkflowsStore();
 const workflowState = injectWorkflowState();
-const posthogStore = usePostHog();
 const router = useRouter();
 const { runWorkflow } = useRunWorkflow({ router });
 
@@ -114,23 +111,7 @@ const activeNode = computed(() => workflowsStore.getNodeByName(props.activeNodeN
 const rootNode = computed(() => {
 	if (!activeNode.value) return null;
 
-	// Find the first child that has a main input connection to account for nested subnodes
-	const findRootWithMainConnection = (nodeName: string): string | null => {
-		const children = props.workflowObject.getChildNodes(nodeName, 'ALL');
-
-		for (let i = children.length - 1; i >= 0; i--) {
-			const childName = children[i];
-			// Check if this child has main input connections
-			const parentNodes = props.workflowObject.getParentNodes(childName, NodeConnectionTypes.Main);
-			if (parentNodes.length > 0) {
-				return childName;
-			}
-		}
-
-		return null;
-	};
-
-	return findRootWithMainConnection(activeNode.value.name);
+	return workflowsStore.findRootWithMainConnection(activeNode.value.name);
 });
 
 const hasRootNodeRun = computed(() => {
@@ -273,12 +254,7 @@ const waitingMessage = computed(() => {
 	);
 });
 
-const isNDVV2 = computed(() =>
-	posthogStore.isVariantEnabled(
-		NDV_UI_OVERHAUL_EXPERIMENT.name,
-		NDV_UI_OVERHAUL_EXPERIMENT.variant,
-	),
-);
+const isNDVV2 = computed(() => true);
 
 const nodeNameToExecute = computed(
 	() => (isActiveNodeConfig.value ? rootNode.value : activeNode.value?.name) ?? '',
@@ -415,7 +391,6 @@ function handleChangeCollapsingColumn(columnName: string | null) {
 		:run-index="isMappingMode ? 0 : runIndex"
 		:linked-runs="linkedRuns"
 		:can-link-runs="!mappedNode && canLinkRuns"
-		:too-much-data-title="i18n.baseText('ndv.input.tooMuchData.title')"
 		:no-data-in-branch-message="i18n.baseText('ndv.input.noOutputDataInBranch')"
 		:is-executing="isExecutingPrevious"
 		:executing-message="i18n.baseText('ndv.input.executingPrevious')"
@@ -494,7 +469,17 @@ function handleChangeCollapsingColumn(columnName: string | null) {
 				<NDVEmptyState v-if="nodeNotRunMessageVariant === 'simple'">
 					<I18nT scope="global" keypath="ndv.input.noOutputData.embeddedNdv.description">
 						<template #link>
-							<a href="#" @click.prevent="runWorkflow({ destinationNode: activeNodeName })">
+							<a
+								href="#"
+								@click.prevent="
+									runWorkflow({
+										destinationNode: {
+											nodeName: activeNodeName,
+											mode: 'exclusive',
+										},
+									})
+								"
+							>
 								{{ i18n.baseText('ndv.input.noOutputData.embeddedNdv.link') }}
 							</a>
 						</template>
@@ -523,6 +508,7 @@ function handleChangeCollapsingColumn(columnName: string | null) {
 									tooltip-placement="bottom"
 									telemetry-source="inputs"
 									data-test-id="execute-previous-node"
+									execution-mode="exclusive"
 									@execute="onNodeExecute"
 								/>
 								<br />
@@ -583,6 +569,7 @@ function handleChangeCollapsingColumn(columnName: string | null) {
 						class="mt-m"
 						telemetry-source="inputs"
 						data-test-id="execute-previous-node"
+						execution-mode="exclusive"
 						tooltip-placement="bottom"
 						:show-loading-spinner="false"
 						@execute="onNodeExecute"
@@ -623,7 +610,7 @@ function handleChangeCollapsingColumn(columnName: string | null) {
 						<I18nT tag="span" keypath="ndv.input.notConnected.v2.description" scope="global">
 							<template #link>
 								<a
-									href="https://docs.n8n.io/workflows/connections/"
+									href="https://docs.n8n.io/workflows/components/connections/"
 									target="_blank"
 									@click="onConnectionHelpClick"
 								>
@@ -644,7 +631,7 @@ function handleChangeCollapsingColumn(columnName: string | null) {
 					<N8nText tag="div">
 						{{ i18n.baseText('ndv.input.notConnected.message') }}
 						<a
-							href="https://docs.n8n.io/workflows/connections/"
+							href="https://docs.n8n.io/workflows/components/connections/"
 							target="_blank"
 							@click="onConnectionHelpClick"
 						>

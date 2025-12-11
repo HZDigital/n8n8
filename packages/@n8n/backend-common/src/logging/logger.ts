@@ -34,6 +34,10 @@ export class Logger implements LoggerType {
 	/** https://no-color.org/ */
 	private readonly noColor = process.env.NO_COLOR !== undefined && process.env.NO_COLOR !== '';
 
+	// Allow opt-in coloring in production by setting NO_COLOR to 'false' or '0'
+	private readonly noColorDefaultTrue =
+		process.env.NO_COLOR !== 'false' && process.env.NO_COLOR !== '0';
+
 	constructor(
 		private readonly globalConfig: GlobalConfig,
 		private readonly instanceSettingsConfig: InstanceSettingsConfig,
@@ -152,7 +156,7 @@ export class Logger implements LoggerType {
 		} else if (this.level === 'debug' && inProduction) {
 			return this.debugProdConsoleFormat();
 		} else {
-			return winston.format.printf(({ message }: { message: string }) => message);
+			return winston.format.printf((info) => String(info.message));
 		}
 	}
 
@@ -175,7 +179,13 @@ export class Logger implements LoggerType {
 		})();
 	}
 
-	private color() {
+	private color(defaultToTrue: boolean = false) {
+		if (defaultToTrue) {
+			return this.noColorDefaultTrue
+				? winston.format.uncolorize()
+				: winston.format.colorize({ all: true });
+		}
+		// For development: respect NO_COLOR, otherwise colorize
 		return this.noColor ? winston.format.uncolorize() : winston.format.colorize({ all: true });
 	}
 
@@ -199,7 +209,7 @@ export class Logger implements LoggerType {
 		return winston.format.combine(
 			winston.format.metadata(),
 			winston.format.timestamp(),
-			this.color(),
+			this.color(true), // Default to no colors in production
 			this.scopeFilter(),
 			winston.format.printf(({ level, message, timestamp, metadata: rawMetadata }) => {
 				const metadata = this.toPrintable(rawMetadata);

@@ -19,25 +19,24 @@ import {
 	MODAL_CONFIRM,
 	START_NODE_TYPE,
 	STICKY_NODE_TYPE,
-} from '@/constants';
-import { useWorkflowActivate } from '@/composables/useWorkflowActivate';
-import type { DataPinningDiscoveryEvent } from '@/event-bus';
-import { dataPinningEventBus } from '@/event-bus';
+} from '@/app/constants';
+import type { DataPinningDiscoveryEvent } from '@/app/event-bus';
+import { dataPinningEventBus } from '@/app/event-bus';
 import { ndvEventBus } from '@/features/ndv/shared/ndv.eventBus';
-import { useWorkflowsStore } from '@/stores/workflows.store';
+import { useWorkflowsStore } from '@/app/stores/workflows.store';
 import { useNDVStore } from '@/features/ndv/shared/ndv.store';
-import { useNodeTypesStore } from '@/stores/nodeTypes.store';
+import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import { useDeviceSupport } from '@n8n/composables/useDeviceSupport';
-import { useNodeHelpers } from '@/composables/useNodeHelpers';
-import { useMessage } from '@/composables/useMessage';
-import { useExternalHooks } from '@/composables/useExternalHooks';
-import { usePinnedData } from '@/composables/usePinnedData';
-import { useTelemetry } from '@/composables/useTelemetry';
+import { useNodeHelpers } from '@/app/composables/useNodeHelpers';
+import { useMessage } from '@/app/composables/useMessage';
+import { useExternalHooks } from '@/app/composables/useExternalHooks';
+import { usePinnedData } from '@/app/composables/usePinnedData';
+import { useTelemetry } from '@/app/composables/useTelemetry';
 import { useI18n } from '@n8n/i18n';
 import { storeToRefs } from 'pinia';
-import { useStyles } from '@/composables/useStyles';
-import { useTelemetryContext } from '@/composables/useTelemetryContext';
-
+import { useStyles } from '@/app/composables/useStyles';
+import { useTelemetryContext } from '@/app/composables/useTelemetryContext';
+import { nodeViewEventBus } from '@/app/event-bus';
 import { ElDialog } from 'element-plus';
 import { N8nIcon, N8nText, N8nTooltip } from '@n8n/design-system';
 const emit = defineEmits<{
@@ -70,7 +69,6 @@ const externalHooks = useExternalHooks();
 const nodeHelpers = useNodeHelpers();
 const { activeNode } = storeToRefs(ndvStore);
 const pinnedData = usePinnedData(activeNode);
-const workflowActivate = useWorkflowActivate();
 const nodeTypesStore = useNodeTypesStore();
 const workflowsStore = useWorkflowsStore();
 const deviceSupport = useDeviceSupport();
@@ -373,9 +371,7 @@ const onInputTableMounted = (e: { avgRowHeight: number }) => {
 
 const onWorkflowActivate = () => {
 	ndvStore.unsetActiveNodeName();
-	setTimeout(() => {
-		void workflowActivate.activateCurrentWorkflow('ndv');
-	}, 1000);
+	nodeViewEventBus.emit('publishWorkflow');
 };
 
 const onOutputItemHover = (e: { itemIndex: number; outputIndex: number } | null) => {
