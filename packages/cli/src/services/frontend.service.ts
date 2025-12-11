@@ -89,6 +89,22 @@ export type PublicFrontendSettings = {
 			/** Required for OIDC authentication redirect URL */
 			loginUrl: FrontendSettings['sso']['oidc']['loginUrl'];
 		};
+		azureAd: {
+			/** Config flag for Azure AD SSO button */
+			loginEnabled: FrontendSettings['sso']['azureAd']['loginEnabled'];
+
+			/** Required for Azure AD authentication redirect URL */
+			loginUrl: FrontendSettings['sso']['azureAd']['loginUrl'];
+
+			/** Custom label for Azure AD login button */
+			loginLabel: FrontendSettings['sso']['azureAd']['loginLabel'];
+
+			/** SSO login URL for Azure AD */
+			ssoLoginUrl: FrontendSettings['sso']['azureAd']['ssoLoginUrl'];
+
+			/** Whether to force Azure AD authentication */
+			forceAuthentication: FrontendSettings['sso']['azureAd']['forceAuthentication'];
+		};
 	};
 };
 
@@ -143,6 +159,8 @@ export class FrontendService {
 	private async initSettings() {
 		const instanceBaseUrl = this.urlService.getInstanceBaseUrl();
 		const restEndpoint = this.globalConfig.endpoints.rest;
+		const hideGenericSsoLoginButton = process.env.N8N_HIDE_GENERIC_SSO_LOGIN_BUTTON === 'true';
+		const azureAdConfig = this.globalConfig.azureAd;
 
 		const telemetrySettings: ITelemetrySettings = {
 			enabled: this.globalConfig.diagnostics.enabled,
@@ -246,6 +264,14 @@ export class FrontendService {
 					loginEnabled: false,
 					loginUrl: `${instanceBaseUrl}/${restEndpoint}/sso/oidc/login`,
 					callbackUrl: `${instanceBaseUrl}/${restEndpoint}/sso/oidc/callback`,
+				},
+				hideGenericSsoLoginButton,
+				azureAd: {
+					loginEnabled: azureAdConfig.loginEnabled,
+					loginLabel: azureAdConfig.loginLabel,
+					loginUrl: `${instanceBaseUrl}/${restEndpoint}/azure-ad/login`,
+					ssoLoginUrl: `${instanceBaseUrl}/${restEndpoint}/azure-ad/sso-login`,
+					forceAuthentication: azureAdConfig.forceAuthentication,
 				},
 			},
 			dataTables: {
@@ -434,7 +460,9 @@ export class FrontendService {
 			variables: this.license.isVariablesEnabled(),
 			sourceControl: this.license.isSourceControlLicensed(),
 			externalSecrets: this.license.isExternalSecretsEnabled(),
-			showNonProdBanner: this.license.isLicensed(LICENSE_FEATURES.SHOW_NON_PROD_BANNER),
+			showNonProdBanner:
+				!this.globalConfig.license.hideNonProdBanner &&
+				this.license.isLicensed(LICENSE_FEATURES.SHOW_NON_PROD_BANNER),
 			debugInEditor: this.license.isDebugInEditorLicensed(),
 			binaryDataS3: isS3Available && isS3Selected && isS3Licensed,
 			workerView: this.license.isWorkerViewLicensed(),
@@ -523,7 +551,7 @@ export class FrontendService {
 		// Get full settings to ensure all required properties are initialized
 		const {
 			userManagement: { authenticationMethod, showSetupOnFirstLoad, smtpSetup },
-			sso: { saml: ssoSaml, ldap: ssoLdap, oidc: ssoOidc },
+			sso: { saml: ssoSaml, ldap: ssoLdap, oidc: ssoOidc, azureAd: ssoAzureAd },
 			authCookie,
 			previewMode,
 			enterprise: { saml, ldap, oidc },
@@ -540,6 +568,13 @@ export class FrontendService {
 				oidc: {
 					loginEnabled: ssoOidc.loginEnabled,
 					loginUrl: ssoOidc.loginUrl,
+				},
+				azureAd: {
+					loginEnabled: ssoAzureAd.loginEnabled,
+					loginUrl: ssoAzureAd.loginUrl,
+					loginLabel: ssoAzureAd.loginLabel,
+					ssoLoginUrl: ssoAzureAd.ssoLoginUrl,
+					forceAuthentication: ssoAzureAd.forceAuthentication,
 				},
 			},
 			authCookie,

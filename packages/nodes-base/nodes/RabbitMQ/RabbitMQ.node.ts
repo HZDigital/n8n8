@@ -463,7 +463,7 @@ export class RabbitMQ implements INodeType {
 				});
 
 				await channel.close();
-				await channel.connection.close();
+				await (channel.connection as unknown as amqplib.ChannelModel).close();
 			} else if (mode === 'exchange') {
 				const exchange = this.getNodeParameter('exchange', 0) as string;
 				const routingKey = this.getNodeParameter('routingKey', 0) as string;
@@ -533,7 +533,7 @@ export class RabbitMQ implements INodeType {
 				});
 
 				await channel.close();
-				await channel.connection.close();
+				await (channel.connection as unknown as amqplib.ChannelModel).close();
 			} else {
 				throw new NodeOperationError(this.getNode(), `The operation "${mode}" is not known!`);
 			}
@@ -542,7 +542,7 @@ export class RabbitMQ implements INodeType {
 		} catch (error) {
 			if (channel) {
 				await channel.close();
-				await channel.connection.close();
+				await (channel.connection as unknown as amqplib.ChannelModel).close();
 			}
 			throw error;
 		}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import AuthView from './AuthView.vue';
@@ -16,6 +16,7 @@ import { useSSOStore } from '@/features/settings/sso/sso.store';
 import type { IFormBoxConfig } from '@/Interface';
 import { MFA_AUTHENTICATION_REQUIRED_ERROR_CODE, VIEWS, MFA_FORM } from '@/app/constants';
 import type { LoginRequestDto } from '@n8n/api-types';
+import { getAzureAdTokenFromQuery } from '@/app/composables/useAzureAdToken';
 
 export type EmailOrLdapLoginIdAndPassword = Pick<
 	LoginRequestDto,
@@ -40,6 +41,23 @@ const showMfaView = ref(false);
 const emailOrLdapLoginId = ref('');
 const password = ref('');
 const reportError = ref(false);
+
+// Redirect to Azure AD when forced or an Azure token is provided
+onMounted(() => {
+	if (!ssoStore.isAzureAdLoginEnabled) return;
+
+	const azureToken = getAzureAdTokenFromQuery(route);
+	if (azureToken) {
+		window.location.href = ssoStore.getAzureAdSsoLoginUrl(azureToken);
+		return;
+	}
+
+	if (ssoStore.isAzureAdForceAuthenticationEnabled) {
+		const redirect = typeof route.query?.redirect === 'string' ? route.query.redirect : undefined;
+		const loginUrl = ssoStore.getAzureAdLoginUrl(redirect);
+		window.location.href = loginUrl;
+	}
+});
 
 const ldapLoginLabel = computed(() => ssoStore.ldapLoginLabel);
 const isLdapLoginEnabled = computed(() => ssoStore.isLdapLoginEnabled);

@@ -5,7 +5,9 @@
 		"outDir": "dist/cjs",
 		"strict": true,
 		"skipLibCheck": true,
-		"esModuleInterop": true
+		"esModuleInterop": true,
+		"lib": ["es2020"],
+		"types": []
 	},
 	"include": ["src"]
 }
