@@ -32,6 +32,7 @@ import {
 	isOidcCurrentAuthenticationMethod,
 	isSamlCurrentAuthenticationMethod,
 	isSsoCurrentAuthenticationMethod,
+	isAzureAdForceAuthenticationEnabled,
 } from '@/sso.ee/sso-helpers';
 import '../auth/handlers/email.auth-handler';
 
@@ -70,6 +71,25 @@ export class AuthController {
 		@Body payload: LoginRequestDto,
 	): Promise<PublicUser | undefined> {
 		const { emailOrLdapLoginId, password, mfaCode, mfaRecoveryCode } = payload;
+
+		// Check if Azure AD force authentication is enabled
+		if (isAzureAdForceAuthenticationEnabled()) {
+			this.logger.debug(
+				'Email/password login attempt blocked - Azure AD force authentication is enabled',
+				{
+					email: emailOrLdapLoginId,
+				},
+			);
+			const usedAuthenticationMethod = getCurrentAuthenticationMethod();
+			this.eventService.emit('user-login-failed', {
+				authenticationMethod: usedAuthenticationMethod,
+				userEmail: emailOrLdapLoginId,
+				reason: 'azure ad required',
+			});
+			throw new AuthError(
+				'Email/password authentication is disabled. Please use Azure AD to log in',
+			);
+		}
 
 		const currentAuthenticationMethod = getCurrentAuthenticationMethod();
 		this.validateEmailFormat(currentAuthenticationMethod, emailOrLdapLoginId);

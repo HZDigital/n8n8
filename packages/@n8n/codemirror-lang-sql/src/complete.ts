@@ -1,7 +1,7 @@
 import type { Completion, CompletionContext, CompletionSource } from '@codemirror/autocomplete';
 import { completeFromList, ifNotIn } from '@codemirror/autocomplete';
 import { syntaxTree } from '@codemirror/language';
-import type { EditorState, Text } from '@codemirror/state';
+import type { Text } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 
 import { Type, Keyword } from './grammar.sql.terms';
@@ -44,8 +44,8 @@ function parentsFor(doc: Text, node: SyntaxNode | null) {
 	}
 }
 
-function sourceContext(state: EditorState, startPos: number) {
-	const pos = syntaxTree(state).resolveInner(startPos, -1);
+function sourceContext(state: CompletionContext['state'], startPos: number) {
+	const pos = syntaxTree(state as unknown as Parameters<typeof syntaxTree>[0]).resolveInner(startPos, -1);
 	const aliases = getAliases(state.doc, pos);
 	if (pos.name === 'Identifier' || pos.name === 'QuotedIdentifier' || pos.name === 'Keyword') {
 		return {

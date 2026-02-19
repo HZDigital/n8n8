@@ -149,7 +149,7 @@ export class SQLDialect {
 	) {}
 
 	/// Returns the language for this dialect as an extension.
-	get extension() {
+	get extension(): LRLanguage['extension'] {
 		return this.language.extension;
 	}
 

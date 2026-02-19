@@ -20,6 +20,7 @@ import { PasswordUtility } from './password.utility';
 import { IsNull } from '@n8n/typeorm/find-options/operator/IsNull';
 import { Not } from '@n8n/typeorm/find-options/operator/Not';
 import config from '@/config';
+import { isAzureAdForceAuthenticationEnabled } from '@/sso.ee/sso-helpers';
 
 @Service()
 export class OwnershipService {
@@ -213,6 +214,16 @@ export class OwnershipService {
 	}
 
 	async setupOwner(payload: OwnerSetupRequestDto) {
+		// Check if Azure AD force authentication is enabled
+		if (isAzureAdForceAuthenticationEnabled()) {
+			this.logger.debug(
+				'Request to setup owner via email/password blocked - Azure AD force authentication is enabled',
+			);
+			throw new BadRequestError(
+				'Email/password setup is disabled. Please log in with Azure AD - the first user will automatically become the owner.',
+			);
+		}
+
 		const { email, firstName, lastName, password } = payload;
 		if (await this.hasInstanceOwner()) {
 			this.logger.debug(

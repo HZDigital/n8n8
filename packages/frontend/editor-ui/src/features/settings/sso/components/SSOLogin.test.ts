@@ -43,7 +43,17 @@ describe('SSOLogin', () => {
 
 	it('should render button if the store returns true for the conditions', () => {
 		vi.spyOn(ssoStore, 'showSsoLoginButton', 'get').mockReturnValue(true);
+		vi.spyOn(ssoStore, 'showGenericSsoLoginButton', 'get').mockReturnValue(true);
 		const { queryByRole } = renderComponent({ pinia });
 		expect(queryByRole('button')).toBeInTheDocument();
+	});
+
+	it('should render Azure button even when generic SSO is hidden', () => {
+		vi.spyOn(ssoStore, 'showSsoLoginButton', 'get').mockReturnValue(true);
+		vi.spyOn(ssoStore, 'showGenericSsoLoginButton', 'get').mockReturnValue(false);
+		vi.spyOn(ssoStore, 'isAzureAdLoginEnabled', 'get').mockReturnValue(true);
+		const { queryByRole, getAllByRole } = renderComponent({ pinia });
+		expect(queryByRole('button')).toBeInTheDocument();
+		expect(getAllByRole('button').length).toBe(1);
 	});
 });

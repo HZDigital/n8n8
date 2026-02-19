@@ -5,7 +5,7 @@ export const mockInstance = <T>(
 	serviceClass: Constructable<T>,
 	data?: Parameters<typeof mock<T>>[0],
 ) => {
-	const instance = mock<T>(data);
-	Container.set(serviceClass, instance);
+	const instance = mock<T>(data as Parameters<typeof mock<T>>[0]);
+	Container.set(serviceClass, instance as T);
 	return instance;
 };

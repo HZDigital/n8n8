@@ -32,6 +32,7 @@ import type { FrontendService } from '@/services/frontend.service';
 import '@/controllers/active-workflows.controller';
 import '@/controllers/annotation-tags.controller.ee';
 import '@/controllers/auth.controller';
+import '@/controllers/azure-ad.controller';
 import '@/controllers/binary-data.controller';
 import '@/controllers/ai.controller';
 import '@/controllers/dynamic-node-parameters.controller';
@@ -378,8 +379,7 @@ export class Server extends AbstractServer {
 								...cspDirectives,
 							},
 						},
-				xFrameOptions:
-					isPreviewMode || inE2ETests || inDevelopment ? false : { action: 'sameorigin' },
+				xFrameOptions: false,
 				dnsPrefetchControl: false,
 				// This is only relevant for Internet-explorer, which we do not support
 				ieNoOpen: false,

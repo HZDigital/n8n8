@@ -37,6 +37,48 @@ describe('SSO store', () => {
 		},
 	);
 
+	it('should hide generic SSO login button when configured and still allow Azure login', () => {
+		ssoStore.initialize({
+			authenticationMethod: 'saml' as UserManagementAuthenticationMethod,
+			config: {
+				saml: {
+					loginEnabled: true,
+				},
+				hideGenericSsoLoginButton: true,
+			},
+			features: {
+				saml: true,
+				ldap: false,
+				oidc: false,
+			},
+		});
+
+		expect(ssoStore.showGenericSsoLoginButton).toBe(false);
+		expect(ssoStore.showSsoLoginButton).toBe(false);
+
+		ssoStore.initialize({
+			authenticationMethod: 'email' as UserManagementAuthenticationMethod,
+			config: {
+				hideGenericSsoLoginButton: true,
+				azureAd: {
+					loginEnabled: true,
+					loginLabel: 'Sign in with Microsoft',
+					forceAuthentication: false,
+					loginUrl: 'https://example.com',
+					ssoLoginUrl: 'https://example.com/sso',
+				},
+			},
+			features: {
+				saml: false,
+				ldap: false,
+				oidc: false,
+			},
+		});
+
+		expect(ssoStore.showGenericSsoLoginButton).toBe(false);
+		expect(ssoStore.showSsoLoginButton).toBe(true);
+	});
+
 	describe('Protocol Selection Initialization', () => {
 		beforeEach(() => {
 			setActivePinia(createPinia());

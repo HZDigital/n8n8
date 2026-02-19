@@ -17,15 +17,15 @@ function createConfig(supportCloud = true): ConfigArray {
 				supportCloud
 					? n8nCommunityNodesPlugin.configs.recommended
 					: n8nCommunityNodesPlugin.configs.recommendedWithoutN8nCloudSupport,
-				importPlugin.configs['flat/recommended'],
 			],
 			rules: {
+				...(importPlugin.configs['flat/recommended'].rules ?? {}),
 				'prefer-spread': 'off',
 				'no-console': 'error',
 			},
 		},
 		{
-			plugins: { 'n8n-nodes-base': n8nNodesPlugin },
+			plugins: { 'import-x': importPlugin, 'n8n-nodes-base': n8nNodesPlugin },
 			settings: {
 				'import-x/resolver-next': [createTypeScriptImportResolver()],
 			},
@@ -65,7 +65,7 @@ function createConfig(supportCloud = true): ConfigArray {
 		},
 	);
 }
-export const config = createConfig();
-export const configWithoutCloudSupport = createConfig(false);
+export const config: ConfigArray = createConfig();
+export const configWithoutCloudSupport: ConfigArray = createConfig(false);
 
 export default config;

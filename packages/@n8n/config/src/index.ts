@@ -4,6 +4,7 @@ import { AiAssistantConfig } from './configs/ai-assistant.config';
 import { AiBuilderConfig } from './configs/ai-builder.config';
 import { AiConfig } from './configs/ai.config';
 import { AuthConfig } from './configs/auth.config';
+import { AzureAdConfig } from './configs/azure-ad.config';
 import { CacheConfig } from './configs/cache.config';
 import { ChatHubConfig } from './configs/chat-hub.config';
 import { CredentialsConfig } from './configs/credentials.config';
@@ -61,6 +62,7 @@ export { NodesConfig } from './configs/nodes.config';
 export { CronLoggingConfig } from './configs/logging.config';
 export { WorkflowHistoryCompactionConfig } from './configs/workflow-history-compaction.config';
 export { ChatHubConfig } from './configs/chat-hub.config';
+export { AzureAdConfig } from './configs/azure-ad.config';
 
 const protocolSchema = z.enum(['http', 'https']);
 
@@ -186,6 +188,9 @@ export class GlobalConfig {
 
 	@Nested
 	sso: SsoConfig;
+
+	@Nested
+	azureAd: AzureAdConfig;
 
 	/** Default locale for the UI. */
 	@Env('N8N_DEFAULT_LOCALE')

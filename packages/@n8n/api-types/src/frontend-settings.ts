@@ -24,7 +24,7 @@ export interface ITelemetrySettings {
 	config?: ITelemetryClientConfig;
 }
 
-export type AuthenticationMethod = 'email' | 'ldap' | 'saml' | 'oidc';
+export type AuthenticationMethod = 'email' | 'ldap' | 'saml' | 'oidc' | 'azuread';
 
 export interface IUserManagementSettings {
 	quota: number;
@@ -139,6 +139,14 @@ export interface FrontendSettings {
 		ldap: {
 			loginLabel: string;
 			loginEnabled: boolean;
+		};
+		hideGenericSsoLoginButton: boolean;
+		azureAd: {
+			loginEnabled: boolean;
+			loginUrl: string;
+			loginLabel: string;
+			ssoLoginUrl: string;
+			forceAuthentication: boolean;
 		};
 	};
 	publicApi: {

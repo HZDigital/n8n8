@@ -1,9 +1,15 @@
-import { AzureKeyCredential, SearchIndexClient } from '@azure/search-documents';
+import {
+	AzureKeyCredential,
+	SearchIndexClient,
+	SearchIndexingBufferedSender,
+	type SearchClient,
+	type SearchIndex,
+} from '@azure/search-documents';
 import {
 	AzureAISearchVectorStore,
 	AzureAISearchQueryType,
 } from '@langchain/community/vectorstores/azure_aisearch';
-import type { Document } from '@langchain/core/documents';
+import { Document } from '@langchain/core/documents';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import {
 	NodeOperationError,
@@ -24,6 +30,9 @@ export const INDEX_NAME = 'indexName';
 export const QUERY_TYPE = 'queryType';
 export const FILTER = 'filter';
 export const SEMANTIC_CONFIGURATION = 'semanticConfiguration';
+export const VECTOR_FIELD_NAME = 'vectorFieldName';
+
+const DEFAULT_VECTOR_FIELD_NAME = 'contentVector';
 
 const indexNameField: INodeProperties = {
 	displayName: 'Index Name',
@@ -33,6 +42,16 @@ const indexNameField: INodeProperties = {
 	description:
 		'The name of the Azure AI Search index. Will be created automatically if it does not exist.',
 	required: true,
+};
+
+const vectorFieldNameField: INodeProperties = {
+	displayName: 'Vector Field Name',
+	name: VECTOR_FIELD_NAME,
+	type: 'string',
+	default: DEFAULT_VECTOR_FIELD_NAME,
+	description:
+		'Name of the vector field in your Azure AI Search index schema. Change this if your index uses a custom field name such as ContentVector.',
+	placeholder: 'contentVector',
 };
 
 const queryTypeField: INodeProperties = {
@@ -83,7 +102,7 @@ const semanticConfigurationField: INodeProperties = {
 	},
 };
 
-const sharedFields: INodeProperties[] = [indexNameField];
+const sharedFields: INodeProperties[] = [indexNameField, vectorFieldNameField];
 
 const retrieveFields: INodeProperties[] = [
 	{
@@ -153,6 +172,215 @@ function getParameter(key: string, context: IFunctionsContext, itemIndex: number
 }
 
 export const getIndexName = getParameter.bind(null, INDEX_NAME);
+
+function getVectorFieldName(context: IFunctionsContext, itemIndex: number): string {
+	let value: unknown;
+
+	if (isExecutionContext(context)) {
+		value = context.getNodeParameter(VECTOR_FIELD_NAME, itemIndex, DEFAULT_VECTOR_FIELD_NAME, {
+			extractValue: true,
+		});
+	} else {
+		value = context.getNodeParameter(VECTOR_FIELD_NAME, DEFAULT_VECTOR_FIELD_NAME, {
+			extractValue: true,
+		});
+	}
+
+	if (typeof value === 'string' && value.trim().length > 0) {
+		return value.trim();
+	}
+
+	return DEFAULT_VECTOR_FIELD_NAME;
+}
+
+interface AzureStoreInternals {
+	client: SearchClient<Record<string, unknown>>;
+	initPromise: Promise<void> | undefined;
+	semanticConfigurationName: string | undefined;
+}
+
+function getAzureStoreInternals(vectorStore: AzureAISearchVectorStore): AzureStoreInternals {
+	const client = Reflect.get(vectorStore, 'client');
+	if (!client) {
+		throw new Error('Azure AI Search client is not initialized');
+	}
+
+	const initPromiseValue = Reflect.get(vectorStore, 'initPromise');
+	const initPromise = initPromiseValue instanceof Promise ? initPromiseValue : undefined;
+
+	const options = Reflect.get(vectorStore, 'options') as { semanticConfigurationName?: string };
+
+	return {
+		client,
+		initPromise,
+		semanticConfigurationName: options?.semanticConfigurationName,
+	};
+}
+
+function applyVectorFieldOverrides(
+	vectorStore: AzureAISearchVectorStore,
+	vectorFieldName: string,
+): void {
+	if (vectorFieldName === DEFAULT_VECTOR_FIELD_NAME) {
+		return;
+	}
+
+	const { client, initPromise, semanticConfigurationName } = getAzureStoreInternals(vectorStore);
+
+	const originalCreateSearchIndexDefinition = Reflect.get(
+		vectorStore,
+		'createSearchIndexDefinition',
+	) as (indexName: string) => Promise<SearchIndex>;
+	Reflect.set(vectorStore, 'createSearchIndexDefinition', async (indexName: string) => {
+		const indexDefinition = await originalCreateSearchIndexDefinition(indexName);
+		const vectorField = indexDefinition.fields?.find((field) => field.name === DEFAULT_VECTOR_FIELD_NAME);
+		if (vectorField) {
+			vectorField.name = vectorFieldName;
+		}
+		return indexDefinition;
+	});
+
+	vectorStore.addVectors = async (vectors, documents, options) => {
+		const ids = options?.ids ?? documents.map(() => crypto.randomUUID());
+
+		const entities = documents.map((doc, idx) => ({
+			id: ids[idx],
+			content: doc.pageContent,
+			[vectorFieldName]: vectors[idx],
+			metadata: {
+				source: typeof doc.metadata?.source === 'string' ? doc.metadata.source : undefined,
+				attributes: Array.isArray(doc.metadata?.attributes) ? doc.metadata.attributes : [],
+			},
+		}));
+
+		await initPromise;
+
+		const bufferedClient = new SearchIndexingBufferedSender(client, (entity) =>
+			String((entity as { id: string }).id),
+		);
+
+		bufferedClient.on('batchFailed', (response) => {
+			throw new Error(`Azure AI Search uploadDocuments batch failed: ${response}`);
+		});
+
+		await bufferedClient.uploadDocuments(entities);
+		await bufferedClient.flush();
+		await bufferedClient.dispose();
+
+		return ids;
+	};
+
+	const mapResultItemToDocument = (
+		item: { document: Record<string, unknown>; score: number },
+		includeEmbeddings: boolean,
+	): [Document, number] => {
+		const pageContentValue = item.document.content;
+		const metadataValue = item.document.metadata;
+
+		const metadata =
+			typeof metadataValue === 'object' && metadataValue !== null
+				? { ...(metadataValue as Record<string, unknown>) }
+				: {};
+
+		if (includeEmbeddings) {
+			metadata.embedding = item.document[vectorFieldName];
+		}
+
+		const pageContent = typeof pageContentValue === 'string' ? pageContentValue : '';
+
+		return [new Document({ pageContent, metadata }), item.score];
+	};
+
+	vectorStore.similaritySearchVectorWithScore = async (query, k, filter) => {
+		await initPromise;
+
+		const { results } = await client.search('*', {
+			vectorSearchOptions: {
+				queries: [
+					{
+						kind: 'vector',
+						vector: query,
+						kNearestNeighborsCount: k,
+						fields: [vectorFieldName],
+					},
+				],
+				filterMode: filter?.vectorFilterMode,
+			},
+			filter: filter?.filterExpression,
+		});
+
+		const docsWithScore: Array<[Document, number]> = [];
+		for await (const item of results) {
+			docsWithScore.push(mapResultItemToDocument(item, Boolean(filter?.includeEmbeddings)));
+		}
+		return docsWithScore;
+	};
+
+	vectorStore.hybridSearchVectorWithScore = async (query, queryVector, k = 4, filter = undefined) => {
+		const vector = queryVector ?? (await vectorStore.embeddings.embedQuery(query));
+
+		await initPromise;
+
+		const { results } = await client.search(query, {
+			vectorSearchOptions: {
+				queries: [
+					{
+						kind: 'vector',
+						vector,
+						kNearestNeighborsCount: k,
+						fields: [vectorFieldName],
+					},
+				],
+				filterMode: filter?.vectorFilterMode,
+			},
+			filter: filter?.filterExpression,
+			top: k,
+		});
+
+		const docsWithScore: Array<[Document, number]> = [];
+		for await (const item of results) {
+			docsWithScore.push(mapResultItemToDocument(item, Boolean(filter?.includeEmbeddings)));
+		}
+		return docsWithScore;
+	};
+
+	vectorStore.semanticHybridSearchVectorWithScore = async (
+		query,
+		queryVector,
+		k = 4,
+		filter = undefined,
+	) => {
+		const vector = queryVector ?? (await vectorStore.embeddings.embedQuery(query));
+
+		await initPromise;
+
+		const { results } = await client.search(query, {
+			vectorSearchOptions: {
+				queries: [
+					{
+						kind: 'vector',
+						vector,
+						kNearestNeighborsCount: k,
+						fields: [vectorFieldName],
+					},
+				],
+				filterMode: filter?.vectorFilterMode,
+			},
+			filter: filter?.filterExpression,
+			top: k,
+			queryType: 'semantic',
+			semanticSearchOptions: {
+				configurationName: semanticConfigurationName ?? 'semantic-search-config',
+			},
+		});
+
+		const docsWithScore: Array<[Document, number]> = [];
+		for await (const item of results) {
+			docsWithScore.push(mapResultItemToDocument(item, Boolean(filter?.includeEmbeddings)));
+		}
+		return docsWithScore;
+	};
+}
 
 function getOptionValue<T>(
 	name: string,
@@ -276,7 +504,12 @@ async function getAzureAISearchClient(
 			}
 		}
 
-		return new AzureAISearchVectorStore(embeddings, config);
+		const vectorStore = new AzureAISearchVectorStore(embeddings, config);
+
+		const vectorFieldName = getVectorFieldName(context, itemIndex);
+		applyVectorFieldOverrides(vectorStore, vectorFieldName);
+
+		return vectorStore;
 	} catch (error) {
 		if (error instanceof NodeOperationError) {
 			throw error;

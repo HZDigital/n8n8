@@ -50,6 +50,27 @@ export class License implements LicenseProvider {
 		this.logger = this.logger.scoped('license');
 	}
 
+	private getTestSubscriptionPlanName(): string | null {
+		const raw = process.env.TEST_SUBSCRIPTION ?? '';
+		const plan = raw.trim();
+		if (!plan) {
+			return null;
+		}
+
+		switch (plan.toLowerCase()) {
+			case 'enterprise':
+				return 'Enterprise';
+			case 'pro':
+				return 'Pro';
+			case 'business':
+				return 'Business';
+			case 'community':
+				return 'Community';
+			default:
+				return plan;
+		}
+	}
+
 	async init({
 		forceRecreate = false,
 		isCli = false,
@@ -252,6 +273,14 @@ export class License implements LicenseProvider {
 	}
 
 	isLicensed(feature: BooleanLicenseFeature) {
+		const testPlan = this.getTestSubscriptionPlanName();
+		if (testPlan && testPlan.toLowerCase() !== 'community') {
+			if (feature === LICENSE_FEATURES.API_DISABLED) {
+				return false;
+			}
+			return true;
+		}
+
 		return this.manager?.hasFeatureEnabled(feature) ?? false;
 	}
 
@@ -450,6 +479,11 @@ export class License implements LicenseProvider {
 	}
 
 	getPlanName(): string {
+		const testPlan = this.getTestSubscriptionPlanName();
+		if (testPlan) {
+			return testPlan;
+		}
+
 		return this.getValue('planName') ?? 'Community';
 	}
 

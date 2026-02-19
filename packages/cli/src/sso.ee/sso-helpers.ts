@@ -91,6 +91,14 @@ export function isEmailCurrentAuthenticationMethod(): boolean {
 	return getCurrentAuthenticationMethod() === 'email';
 }
 
+export function isAzureAdCurrentAuthenticationMethod(): boolean {
+	return getCurrentAuthenticationMethod() === 'azuread';
+}
+
+export function isAzureAdForceAuthenticationEnabled(): boolean {
+	return Container.get(GlobalConfig).azureAd.forceAuthentication;
+}
+
 export function isSsoJustInTimeProvisioningEnabled(): boolean {
 	return Container.get(GlobalConfig).sso.justInTimeProvisioning;
 }

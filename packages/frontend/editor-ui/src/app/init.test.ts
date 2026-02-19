@@ -133,16 +133,29 @@ describe('Init', () => {
 			const saml = { loginEnabled: true, loginLabel: '' };
 			const ldap = { loginEnabled: false, loginLabel: '' };
 			const oidc = { loginEnabled: false, loginUrl: '', callbackUrl: '' };
+			const azureAd = {
+				loginEnabled: false,
+				loginLabel: 'Sign in with Microsoft',
+				forceAuthentication: false,
+				loginUrl: '',
+				ssoLoginUrl: '',
+			};
 
 			settingsStore.userManagement.authenticationMethod = UserManagementAuthenticationMethod.Saml;
-			settingsStore.settings.sso = { saml, ldap, oidc };
+			settingsStore.settings.sso = {
+				saml,
+				ldap,
+				oidc,
+				hideGenericSsoLoginButton: false,
+				azureAd,
+			};
 			settingsStore.isEnterpriseFeatureEnabled[EnterpriseEditionFeature.Saml] = true;
 
 			await initializeCore();
 
 			expect(ssoStore.initialize).toHaveBeenCalledWith({
 				authenticationMethod: UserManagementAuthenticationMethod.Saml,
-				config: { saml, ldap, oidc },
+				config: { saml, ldap, oidc, hideGenericSsoLoginButton: false, azureAd },
 				features: {
 					saml: true,
 					ldap: false,
