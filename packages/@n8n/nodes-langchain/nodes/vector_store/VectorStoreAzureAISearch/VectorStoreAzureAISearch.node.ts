@@ -51,7 +51,7 @@ const vectorFieldNameField: INodeProperties = {
 	default: DEFAULT_VECTOR_FIELD_NAME,
 	description:
 		'Name of the vector field in your Azure AI Search index schema. Change this if your index uses a custom field name such as ContentVector.',
-	placeholder: 'conten_vVector',
+	placeholder: 'content_Vector',
 };
 
 const queryTypeField: INodeProperties = {
