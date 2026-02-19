@@ -32,7 +32,7 @@ export const FILTER = 'filter';
 export const SEMANTIC_CONFIGURATION = 'semanticConfiguration';
 export const VECTOR_FIELD_NAME = 'vectorFieldName';
 
-const DEFAULT_VECTOR_FIELD_NAME = 'contentVector';
+const DEFAULT_VECTOR_FIELD_NAME = 'content_vector';
 
 const indexNameField: INodeProperties = {
 	displayName: 'Index Name',
@@ -51,7 +51,7 @@ const vectorFieldNameField: INodeProperties = {
 	default: DEFAULT_VECTOR_FIELD_NAME,
 	description:
 		'Name of the vector field in your Azure AI Search index schema. Change this if your index uses a custom field name such as ContentVector.',
-	placeholder: 'contentVector',
+	placeholder: 'conten_vVector',
 };
 
 const queryTypeField: INodeProperties = {
@@ -233,7 +233,9 @@ function applyVectorFieldOverrides(
 	) as (indexName: string) => Promise<SearchIndex>;
 	Reflect.set(vectorStore, 'createSearchIndexDefinition', async (indexName: string) => {
 		const indexDefinition = await originalCreateSearchIndexDefinition(indexName);
-		const vectorField = indexDefinition.fields?.find((field) => field.name === DEFAULT_VECTOR_FIELD_NAME);
+		const vectorField = indexDefinition.fields?.find(
+			(field) => field.name === DEFAULT_VECTOR_FIELD_NAME,
+		);
 		if (vectorField) {
 			vectorField.name = vectorFieldName;
 		}
@@ -316,7 +318,12 @@ function applyVectorFieldOverrides(
 		return docsWithScore;
 	};
 
-	vectorStore.hybridSearchVectorWithScore = async (query, queryVector, k = 4, filter = undefined) => {
+	vectorStore.hybridSearchVectorWithScore = async (
+		query,
+		queryVector,
+		k = 4,
+		filter = undefined,
+	) => {
 		const vector = queryVector ?? (await vectorStore.embeddings.embedQuery(query));
 
 		await initPromise;
