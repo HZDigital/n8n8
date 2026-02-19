@@ -1,4 +1,4 @@
-import { Logger } from '@n8n/backend-common';
+import { LicenseState, Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
 import { isAuthProviderType, SettingsRepository, type AuthProviderType } from '@n8n/db';
 import { Container } from '@n8n/di';
@@ -50,6 +50,25 @@ export function getCurrentAuthenticationMethod(): AuthProviderType {
 
 export function isSamlCurrentAuthenticationMethod(): boolean {
 	return getCurrentAuthenticationMethod() === 'saml';
+}
+
+/**
+ *  Check whether the SAML feature is licensed and enabled in the instance
+ */
+export function isSamlLoginEnabled(): boolean {
+	return Container.get(GlobalConfig).sso.saml.loginEnabled;
+}
+
+export function getSamlLoginLabel(): string {
+	return Container.get(GlobalConfig).sso.saml.loginLabel;
+}
+
+export function isSamlLicensed(): boolean {
+	return Container.get(LicenseState).isSamlLicensed();
+}
+
+export function isSamlLicensedAndEnabled(): boolean {
+	return isSamlLoginEnabled() && isSamlLicensed() && isSamlCurrentAuthenticationMethod();
 }
 
 export function isLdapCurrentAuthenticationMethod(): boolean {

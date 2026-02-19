@@ -47,6 +47,7 @@ describe('DynamicCredentialsProxy', () => {
 			id: 'cred-123',
 			name: 'Test Credential',
 			isResolvable: false,
+			type: 'oAuth2Api',
 		};
 
 		it('should return static data when no provider is set and credential is not resolvable', async () => {
@@ -82,6 +83,7 @@ describe('DynamicCredentialsProxy', () => {
 				staticData,
 				undefined,
 				undefined,
+				undefined,
 			);
 		});
 
@@ -91,7 +93,10 @@ describe('DynamicCredentialsProxy', () => {
 				establishedAt: Date.now(),
 				source: 'manual',
 			};
-			const workflowSettings: IWorkflowSettings = { executionTimeout: 300 };
+			const workflowSettings: IWorkflowSettings = {
+				executionTimeout: 300,
+			};
+			const canUseExternalSecrets = true;
 
 			mockResolverProvider.resolveIfNeeded.mockResolvedValue(staticData);
 			proxy.setResolverProvider(mockResolverProvider);
@@ -101,6 +106,7 @@ describe('DynamicCredentialsProxy', () => {
 				staticData,
 				executionContext,
 				workflowSettings,
+				canUseExternalSecrets,
 			);
 
 			expect(mockResolverProvider.resolveIfNeeded).toHaveBeenCalledWith(
@@ -108,6 +114,7 @@ describe('DynamicCredentialsProxy', () => {
 				staticData,
 				executionContext,
 				workflowSettings,
+				canUseExternalSecrets,
 			);
 		});
 	});

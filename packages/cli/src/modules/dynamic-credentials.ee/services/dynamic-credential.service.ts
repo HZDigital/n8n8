@@ -1,6 +1,7 @@
 import { Logger } from '@n8n/backend-common';
 import { CredentialResolverDataNotFoundError } from '@n8n/decorators';
 import { Service } from '@n8n/di';
+import { NextFunction, Response } from 'express';
 import { Cipher } from 'n8n-core';
 import type {
 	ICredentialDataDecryptedObject,
@@ -9,13 +10,20 @@ import type {
 } from 'n8n-workflow';
 import { jsonParse, toCredentialContext } from 'n8n-workflow';
 
+import { LoadNodesAndCredentials } from '@/load-nodes-and-credentials';
+import { StaticAuthService } from '@/services/static-auth-service';
+
 import { DynamicCredentialResolverRegistry } from './credential-resolver-registry.service';
+import { ResolverConfigExpressionService } from './resolver-config-expression.service';
+import { extractSharedFields } from './shared-fields';
 import type {
 	CredentialResolveMetadata,
 	ICredentialResolutionProvider,
 } from '../../../credentials/credential-resolution-provider.interface';
 import { DynamicCredentialResolverRepository } from '../database/repositories/credential-resolver.repository';
+import { DynamicCredentialsConfig } from '../dynamic-credentials.config';
 import { CredentialResolutionError } from '../errors/credential-resolution.error';
+import { AuthenticatedRequest } from '@n8n/db';
 
 /**
  * Service for resolving credentials dynamically via configured resolvers.
@@ -24,10 +32,13 @@ import { CredentialResolutionError } from '../errors/credential-resolution.error
 @Service()
 export class DynamicCredentialService implements ICredentialResolutionProvider {
 	constructor(
+		private readonly dynamicCredentialConfig: DynamicCredentialsConfig,
 		private readonly resolverRegistry: DynamicCredentialResolverRegistry,
 		private readonly resolverRepository: DynamicCredentialResolverRepository,
+		private readonly loadNodesAndCredentials: LoadNodesAndCredentials,
 		private readonly cipher: Cipher,
 		private readonly logger: Logger,
+		private readonly expressionService: ResolverConfigExpressionService,
 	) {}
 
 	/**
@@ -36,8 +47,8 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 	 *
 	 * @param credentialsResolveMetadata The credential resolve metadata
 	 * @param staticData The decrypted static credential data
-	 * @param executionContext Optional execution context containing credential context
-	 * @param workflowSettings Optional workflow settings containing resolver ID fallback
+	 * @param additionalData Additional workflow execution data for context and settings
+	 * @param canUseExternalSecrets Whether the credential can use external secrets for expression resolution
 	 * @returns Resolved credential data (either dynamic or static)
 	 * @throws {CredentialResolutionError} If resolution fails and fallback is not allowed
 	 */
@@ -46,14 +57,19 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		staticData: ICredentialDataDecryptedObject,
 		executionContext?: IExecutionContext,
 		workflowSettings?: IWorkflowSettings,
+		canUseExternalSecrets?: boolean,
 	): Promise<ICredentialDataDecryptedObject> {
 		// Determine which resolver ID to use: credential's own resolver or workflow's fallback
 		const resolverId =
 			credentialsResolveMetadata.resolverId ?? workflowSettings?.credentialResolverId;
 
 		// Not resolvable - return static credentials
-		if (!credentialsResolveMetadata.isResolvable || !resolverId) {
+		if (!credentialsResolveMetadata.isResolvable) {
 			return staticData;
+		}
+
+		if (!resolverId) {
+			return this.handleMissingResolver(credentialsResolveMetadata, staticData, resolverId);
 		}
 
 		// Load resolver configuration
@@ -66,7 +82,7 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		}
 
 		// Get resolver instance from registry
-		const resolver = this.resolverRegistry.getResolverByName(resolverEntity.type);
+		const resolver = this.resolverRegistry.getResolverByTypename(resolverEntity.type);
 
 		if (!resolver) {
 			return this.handleMissingResolver(credentialsResolveMetadata, staticData, resolverId);
@@ -80,9 +96,21 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		}
 
 		try {
+			const credentialType = this.loadNodesAndCredentials.getCredential(
+				credentialsResolveMetadata.type,
+			);
+
+			const sharedFields = extractSharedFields(credentialType.type);
+
 			// Decrypt and parse resolver configuration
 			const decryptedConfig = this.cipher.decrypt(resolverEntity.config);
-			const resolverConfig = jsonParse<Record<string, unknown>>(decryptedConfig);
+			const parsedConfig = jsonParse<Record<string, unknown>>(decryptedConfig);
+
+			// Resolve expressions in resolver configuration using global data only
+			const resolverConfig = await this.expressionService.resolve(
+				parsedConfig,
+				canUseExternalSecrets ?? false,
+			);
 
 			// Attempt dynamic resolution
 			const dynamicData = await resolver.getSecret(
@@ -101,6 +129,13 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 				resolverSource: credentialsResolveMetadata.resolverId ? 'credential' : 'workflow',
 				identity: credentialContext.identity,
 			});
+
+			// Remove shared fields from dynamic data to avoid conflicts
+			for (const field of sharedFields) {
+				if (field in dynamicData) {
+					delete dynamicData[field];
+				}
+			}
 
 			// Adds and override static data with dynamically resolved data
 			return { ...staticData, ...dynamicData };
@@ -172,7 +207,7 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 	private handleMissingResolver(
 		credentialsResolveMetadata: CredentialResolveMetadata,
 		staticData: ICredentialDataDecryptedObject,
-		resolverId: string,
+		resolverId?: string,
 	): ICredentialDataDecryptedObject {
 		if (credentialsResolveMetadata.resolvableAllowFallback) {
 			this.logger.debug('Resolver not found, falling back to static credentials', {
@@ -185,7 +220,7 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		}
 
 		throw new CredentialResolutionError(
-			`Resolver "${resolverId}" not found for credential "${credentialsResolveMetadata.name}"`,
+			`Resolver "${resolverId ?? 'unknown'}" not found for credential "${credentialsResolveMetadata.name}"`,
 		);
 	}
 
@@ -207,5 +242,41 @@ export class DynamicCredentialService implements ICredentialResolutionProvider {
 		throw new CredentialResolutionError(
 			`Cannot resolve dynamic credentials without execution context for "${credentialsResolveMetadata.name}"`,
 		);
+	}
+
+	/**
+	 * Returns middleware for authenticating dynamic credentials endpoints.
+	 * Uses static token from configuration.
+	 */
+	getDynamicCredentialsEndpointsMiddleware() {
+		const { endpointAuthToken } = this.dynamicCredentialConfig;
+		if (!endpointAuthToken?.trim()) {
+			return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+				// If a user was authenticated for this request, we allow access irrelevant of the static authentication
+				if (req.user) {
+					return next();
+				}
+				this.logger.error(
+					'Dynamic credentials external endpoints require an endpoint auth token. Please set the N8N_DYNAMIC_CREDENTIALS_ENDPOINT_AUTH_TOKEN environment variable to enable access.',
+				);
+				res.status(500).json({
+					message: 'Dynamic credentials configuration is invalid. Check server logs for details.',
+				});
+				return;
+			};
+		}
+
+		const staticAuthMiddlware = StaticAuthService.getStaticAuthMiddleware(
+			endpointAuthToken,
+			'x-authorization',
+		)!;
+
+		return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+			// If a user was authenticated for this request, we allow access irrelevant of the static authentication
+			if (req.user) {
+				return next();
+			}
+			return staticAuthMiddlware(req, res, next);
+		};
 	}
 }

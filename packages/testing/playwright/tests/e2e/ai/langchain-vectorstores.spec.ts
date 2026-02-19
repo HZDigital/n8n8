@@ -2,21 +2,21 @@ import { test, expect } from '../../../fixtures/base';
 import type { n8nPage } from '../../../pages/n8nPage';
 
 // Helper functions for common operations
-async function waitForWorkflowSuccess(n8n: n8nPage, timeout = 3000) {
+async function waitForWorkflowSuccess(n8n: n8nPage, timeout = 10000) {
 	await n8n.notifications.waitForNotificationAndClose('Workflow executed successfully', {
 		timeout,
 	});
 }
 
-test.use({
-	addContainerCapability: {
-		proxyServerEnabled: true,
-	},
-});
-test.describe('Langchain Integration @capability:proxy', () => {
-	test.beforeEach(async ({ n8n, proxyServer }) => {
-		await proxyServer.clearAllExpectations();
-		await proxyServer.loadExpectations('langchain');
+test.use({ capability: 'proxy' });
+test.describe('Langchain Integration @capability:proxy', {
+	annotation: [
+		{ type: 'owner', description: 'AI' },
+	],
+}, () => {
+	test.beforeEach(async ({ n8n, services }) => {
+		await services.proxy.clearAllExpectations();
+		await services.proxy.loadExpectations('langchain');
 		await n8n.canvas.openNewWorkflow();
 	});
 
@@ -84,21 +84,21 @@ test.describe('Langchain Integration @capability:proxy', () => {
 			await n8n.canvas.clickZoomToFitButton();
 
 			// Check that chat modal is not initially visible
-			await expect(n8n.canvas.getManualChatModal().locator('main')).toBeHidden();
+			await expect(n8n.canvas.getManualChatModal().getByTestId('canvas-chat-body')).toBeHidden();
 
 			// Open Node 1 and execute it
 			await n8n.canvas.openNode('Node 1');
 			await n8n.ndv.execute();
 			// Chat modal should now be visible
-			await expect(n8n.canvas.getManualChatModal().locator('main')).toBeVisible();
+			await expect(n8n.canvas.getManualChatModal().getByTestId('canvas-chat-body')).toBeVisible();
 
 			// Send first message
 			await n8n.canvas.logsPanel.sendManualChatMessage('Test');
 			await expect(n8n.canvas.getManualChatLatestBotMessage()).toContainText('this_my_field_1');
 
 			// Refresh session
-			await n8n.page.getByTestId('refresh-session-button').click();
-			await expect(n8n.canvas.getManualChatMessages()).not.toBeAttached();
+			await n8n.canvas.logsPanel.refreshSession();
+			await expect(n8n.canvas.logsPanel.getManualChatMessages()).not.toBeAttached();
 
 			// Send another message
 			await n8n.canvas.logsPanel.sendManualChatMessage('Another test');

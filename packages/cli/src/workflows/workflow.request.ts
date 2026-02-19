@@ -29,6 +29,7 @@ export declare namespace WorkflowRequest {
 		uiContext?: string;
 		expectedChecksum?: string;
 		aiBuilderAssisted?: boolean;
+		autosaved?: boolean;
 	}>;
 
 	// TODO: Use a discriminator when CAT-1809 lands
@@ -37,7 +38,7 @@ export declare namespace WorkflowRequest {
 	type FullManualExecutionFromKnownTriggerPayload = {
 		workflowData: IWorkflowBase;
 		agentRequest?: AiAgentRequest;
-
+		chatSessionId?: string;
 		destinationNode?: IDestinationNode;
 		triggerToStartFrom: { name: string; data?: ITaskData };
 	};

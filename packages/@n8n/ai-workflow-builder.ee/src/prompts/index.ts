@@ -3,29 +3,45 @@
  *
  * This directory contains all prompts used by the AI workflow builder agents and chains.
  * Organization:
- * - agents/ - Multi-agent system prompts (builder, configurator, discovery, etc.)
+ * - builder/ - PromptBuilder utility for composing prompts
+ * - agents/ - Agent prompts (supervisor, discovery, builder, responder)
  * - chains/ - Chain-level prompts (categorization, compact, workflow-name, parameter-updater)
- * - legacy-agent.prompt.ts - Legacy single-agent mode prompt
+ * - shared/ - Shared prompt fragments
  */
 
-// Agent prompts (multi-agent system)
-export { buildBuilderPrompt } from './agents/builder.prompt';
+// Prompt builder utility
+export {
+	PromptBuilder,
+	prompt,
+	type ContentOrFactory,
+	type MessageBlock,
+	type PromptBuilderOptions,
+	type SectionFormat,
+	type SectionOptions,
+} from './builder';
+
+// Agent prompts
+export {
+	buildBuilderPrompt,
+	INSTANCE_URL_PROMPT,
+	buildRecoveryModeContext,
+} from './agents/builder.prompt';
 export {
 	buildDiscoveryPrompt,
+	exampleCategorizations,
 	formatTechniqueList,
 	formatExampleCategorizations,
 	type DiscoveryPromptOptions,
 } from './agents/discovery.prompt';
-export { buildConfiguratorPrompt, INSTANCE_URL_PROMPT } from './agents/configurator.prompt';
-export { buildSupervisorPrompt, SUPERVISOR_PROMPT_SUFFIX } from './agents/supervisor.prompt';
-export { buildResponderPrompt } from './agents/responder.prompt';
-
-// Legacy agent prompt (single-agent mode)
+export { buildSupervisorPrompt } from './agents/supervisor.prompt';
+export { buildPlannerPrompt, buildPlannerContext } from './agents/planner.prompt';
 export {
-	createMainAgentPrompt,
-	mainAgentPrompt,
-	type MainAgentPromptOptions,
-} from './legacy-agent.prompt';
+	buildResponderPrompt,
+	buildRecursionErrorWithWorkflowGuidance,
+	buildRecursionErrorNoWorkflowGuidance,
+	buildGeneralErrorGuidance,
+	buildDataTableCreationGuidance,
+} from './agents/responder.prompt';
 
 // Chain prompts
 export {
@@ -39,12 +55,19 @@ export { workflowNamingPromptTemplate } from './chains/workflow-name.prompt';
 
 // Parameter updater prompts
 export {
-	ParameterUpdatePromptBuilder,
+	// Registry system
+	getMatchingGuides,
+	getMatchingExamples,
+	matchesPattern,
+	// Utilities
+	hasResourceLocatorParameters,
 	instanceUrlPrompt,
+	// Base prompts
 	CORE_INSTRUCTIONS,
 	EXPRESSION_RULES,
 	COMMON_PATTERNS,
 	OUTPUT_FORMAT,
+	// Node-type guides
 	SET_NODE_GUIDE,
 	IF_NODE_GUIDE,
 	SWITCH_NODE_GUIDE,
@@ -53,4 +76,11 @@ export {
 	RESOURCE_LOCATOR_GUIDE,
 	SYSTEM_MESSAGE_GUIDE,
 	TEXT_FIELDS_GUIDE,
+} from './chains/parameter-updater';
+
+export type {
+	NodeTypeGuide,
+	NodeTypeExamples,
+	NodeTypePattern,
+	PromptContext,
 } from './chains/parameter-updater';
