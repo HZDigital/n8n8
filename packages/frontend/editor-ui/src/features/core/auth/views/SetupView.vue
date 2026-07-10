@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router';
 
 import { useToast } from '@/app/composables/useToast';
 import { useI18n } from '@n8n/i18n';
+import { createPasswordRules } from '@n8n/design-system';
 
 import { useSettingsStore } from '@/app/stores/settings.store';
 import { useUsersStore } from '@/features/settings/users/users.store';
@@ -24,6 +25,7 @@ const locale = useI18n();
 const router = useRouter();
 const route = useRoute();
 
+const passwordMinLength = settingsStore.userManagement.passwordMinLength ?? 8;
 const loading = ref(false);
 
 // Redirect to Azure AD login for owner setup when enforced or an Azure token is supplied
@@ -96,8 +98,10 @@ const formConfig: IFormBoxConfig = reactive({
 				label: locale.baseText('auth.password'),
 				type: 'password',
 				required: true,
-				validationRules: [{ name: 'DEFAULT_PASSWORD_RULES' }],
-				infoText: locale.baseText('auth.defaultPasswordRequirements'),
+				validationRules: [createPasswordRules(passwordMinLength)],
+				infoText: locale.baseText('auth.defaultPasswordRequirements', {
+					interpolate: { minimum: passwordMinLength },
+				}),
 				autocomplete: 'new-password',
 				capitalize: true,
 			},
@@ -126,7 +130,8 @@ const onSubmit = async (values: { [key: string]: string | boolean }) => {
 			} catch {}
 		}
 		if (forceRedirectedHere) {
-			await router.push({ name: VIEWS.HOMEPAGE });
+			// Route through root so the guard can land the new owner on Instance AI when enabled.
+			await router.push('/');
 		} else {
 			await router.push({ name: VIEWS.USERS_SETTINGS });
 		}

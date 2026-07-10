@@ -121,6 +121,50 @@ describe('buildSteps', () => {
 			expect(result[1].action.tool).toBe('Search');
 		});
 
+		it('should use input.tool as the tool name for toolkit tools (e.g., MCP Client)', () => {
+			// When an MCP Client node (a toolkit) exposes sub-tools, createEngineRequests stores
+			// the actual MCP tool name (e.g., "list_tickets") in input.tool.
+			// buildSteps must use this name — not nodeNameToToolName("MCP Client") = "MCP_Client" —
+			// so the LLM sees the correct tool name in the scratchpad and does not loop.
+			const response: EngineResponse<RequestResponseMetadata> = {
+				actionResponses: [
+					{
+						action: {
+							actionType: 'ExecutionNodeAction',
+							nodeName: 'MCP Client',
+							input: {
+								id: 'call_123',
+								tool: 'list_tickets', // actual MCP tool name set by createEngineRequests
+								query: 'open tickets',
+							},
+							type: NodeConnectionTypes.AiTool,
+							id: 'call_123',
+							metadata: {
+								itemIndex: 0,
+							},
+						},
+						data: {
+							data: {
+								ai_tool: [[{ json: { tickets: [] } }]],
+							},
+							executionTime: 0,
+							startTime: 0,
+							executionIndex: 0,
+							source: [],
+						},
+					},
+				],
+				metadata: {},
+			};
+
+			const result = buildSteps(response, itemIndex);
+
+			expect(result).toHaveLength(1);
+			expect(result[0].action.tool).toBe('list_tickets');
+			// The messageLog AIMessage must also carry the correct name so the LLM history is accurate
+			expect(result[0].action.messageLog?.[0]?.tool_calls?.[0]?.name).toBe('list_tickets');
+		});
+
 		it('should filter out responses for different item indexes', () => {
 			const response: EngineResponse<RequestResponseMetadata> = {
 				actionResponses: [
@@ -366,6 +410,8 @@ describe('buildSteps', () => {
 				expect(result[0].action.messageLog).toHaveLength(1);
 
 				const message = result[0].action.messageLog![0];
+				expect(message.content).toEqual([]);
+				expect(result[0].action.log).toBe('Calling Calculator Node');
 				expect(message).toHaveProperty('tool_calls');
 				expect(message.tool_calls).toHaveLength(1);
 				expect(message.tool_calls?.[0]).toMatchObject({
@@ -834,7 +880,7 @@ describe('buildSteps', () => {
 			});
 		});
 
-		it('should use string content when no thinking blocks present', () => {
+		it('should use empty content and tool_calls when no thinking blocks are present', () => {
 			const response: EngineResponse<RequestResponseMetadata> = {
 				actionResponses: [
 					{
@@ -873,9 +919,9 @@ describe('buildSteps', () => {
 			expect(result[0].action.messageLog).toHaveLength(1);
 
 			const message = result[0].action.messageLog![0];
-			expect(typeof message.content).toBe('string');
-			expect(message.content).toContain('Calling Calculator');
+			expect(message.content).toEqual([]);
 			expect(message).toHaveProperty('tool_calls');
+			expect(message.tool_calls?.[0].name).toBe('Calculator');
 		});
 
 		it('should handle thinking content without thinkingType', () => {
@@ -917,8 +963,9 @@ describe('buildSteps', () => {
 
 			expect(result).toHaveLength(1);
 			const message = result[0].action.messageLog![0];
-			// Should fall back to string content when thinkingType is missing
-			expect(typeof message.content).toBe('string');
+			// Should fall back to default tool_calls format when thinkingType is missing
+			expect(message.content).toEqual([]);
+			expect(message.tool_calls?.[0].name).toBe('Calculator');
 		});
 
 		it('should work alongside Gemini thought_signature', () => {
@@ -1067,53 +1114,6 @@ describe('buildSteps', () => {
 			expect(result[0].action.tool).toBe('Calculator_Node');
 		});
 
-		it('should use HITL toolName in message content', () => {
-			const response: EngineResponse<RequestResponseMetadata> = {
-				actionResponses: [
-					{
-						action: {
-							actionType: 'ExecutionNodeAction',
-							nodeName: 'HITL Node',
-							input: {
-								id: 'call_123',
-								input: { query: 'test' },
-							},
-							type: NodeConnectionTypes.AiTool,
-							id: 'call_123',
-							metadata: {
-								itemIndex: 0,
-								hitl: {
-									toolName: 'custom_tool',
-									gatedToolNodeName: 'Custom Tool',
-									originalInput: { query: 'test' },
-								},
-							},
-						},
-						data: {
-							data: {
-								ai_tool: [[{ json: { result: 'success' } }]],
-							},
-							executionTime: 0,
-							startTime: 0,
-							executionIndex: 0,
-							source: [],
-						},
-					},
-				],
-				metadata: {},
-			};
-
-			const result = buildSteps(response, itemIndex);
-
-			expect(result).toHaveLength(1);
-			const message = result[0].action.messageLog![0];
-			// Message content should use the HITL toolName
-			expect(message.content).toContain('Calling custom_tool');
-			expect(message.content).not.toContain('HITL Node');
-			// Tool call should also use the HITL toolName
-			expect(message.tool_calls?.[0].name).toBe('custom_tool');
-		});
-
 		it('should use converted nodeName in message content when HITL metadata is absent', () => {
 			const response: EngineResponse<RequestResponseMetadata> = {
 				actionResponses: [
@@ -1149,8 +1149,7 @@ describe('buildSteps', () => {
 
 			expect(result).toHaveLength(1);
 			const message = result[0].action.messageLog![0];
-			// Message content should use the converted tool name
-			expect(message.content).toContain('Calling My_Custom_Node');
+			expect(message.content).toEqual([]);
 			expect(message.tool_calls?.[0].name).toBe('My_Custom_Node');
 		});
 

@@ -1,5 +1,8 @@
 import type { Page } from '@playwright/test';
 
+import { InstanceAiPage } from '../pages/InstanceAiPage';
+import { SecretsProviderSettingsPage } from '../pages/SecretsProviderSettingsPage';
+
 /**
  * NavigationHelper provides centralized navigation methods for all n8n routes.
  * Handles both project-specific and global routes with proper URL construction.
@@ -13,7 +16,14 @@ import type { Page } from '@playwright/test';
  * - Executions: /home/executions or /projects/{projectId}/executions
  */
 export class NavigationHelper {
-	constructor(private page: Page) {}
+	private readonly instanceAi: InstanceAiPage;
+
+	private readonly secretsProviderSettings: SecretsProviderSettingsPage;
+
+	constructor(private page: Page) {
+		this.instanceAi = new InstanceAiPage(page);
+		this.secretsProviderSettings = new SecretsProviderSettingsPage(page);
+	}
 
 	/**
 	 * Navigate to the home dashboard
@@ -92,6 +102,16 @@ export class NavigationHelper {
 	 */
 	async toWorkflow(workflowId: string = 'new'): Promise<void> {
 		const url = `/workflow/${workflowId}`;
+		await this.page.goto(url);
+	}
+
+	/**
+	 * Navigate to a specific execution within a workflow
+	 * URLs:
+	 * - Existing workflow: /workflow/{workflowId}/executions/{executionId}
+	 */
+	async toExecution(workflowId: string, executionId: string): Promise<void> {
+		const url = `/workflow/${workflowId}/executions/${executionId}`;
 		await this.page.goto(url);
 	}
 
@@ -210,6 +230,14 @@ export class NavigationHelper {
 	}
 
 	/**
+	 * Navigate to Instance AI page
+	 * URL: /assistant
+	 */
+	async toInstanceAi() {
+		await this.instanceAi.goto();
+	}
+
+	/**
 	 * Navigate to ChatHub chat page
 	 * URL: /home/chat
 	 */
@@ -231,5 +259,13 @@ export class NavigationHelper {
 	 */
 	async toChatHubWorkflowAgents() {
 		await this.page.goto('/home/chat/workflow-agents');
+	}
+
+	/**
+	 * Navigate to external secrets settings page
+	 * URL: /settings/external-secrets
+	 */
+	async toExternalSecrets(): Promise<void> {
+		await this.secretsProviderSettings.goto();
 	}
 }
