@@ -34,6 +34,7 @@ const message = useMessage();
 const documentTitle = useDocumentTitle();
 const loadingService = useLoadingService();
 
+const isInitializing = ref(true);
 const isConnected = ref(false);
 const connectionType = ref<'ssh' | 'https'>('ssh');
 const httpsUsername = ref('');
@@ -151,8 +152,16 @@ const initialize = async () => {
 
 onMounted(async () => {
 	documentTitle.set(locale.baseText('settings.sourceControl.title'));
-	if (!sourceControlStore.isEnterpriseSourceControlEnabled) return;
-	await initialize();
+	if (!sourceControlStore.isEnterpriseSourceControlEnabled) {
+		isInitializing.value = false;
+		return;
+	}
+
+	try {
+		await initialize();
+	} finally {
+		isInitializing.value = false;
+	}
 });
 
 const formValidationStatus = reactive<Record<string, boolean>>({
@@ -317,7 +326,7 @@ watch(connectionType, () => {
 						name="repoUrl"
 						validate-on-blur
 						:validation-rules="repoUrlValidationRules"
-						:disabled="isConnected"
+						:disabled="isInitializing || isConnected"
 						:placeholder="
 							connectionType === 'ssh'
 								? locale.baseText('settings.sourceControl.sshRepoUrlPlaceholder')
@@ -413,6 +422,7 @@ watch(connectionType, () => {
 						:validation-rules="keyGeneratorTypeValidationRules"
 						:options="sourceControlStore.sshKeyTypesWithLabel"
 						:model-value="sourceControlStore.preferences.keyGeneratorType"
+						:disabled="isInitializing"
 						@validate="(value: boolean) => onValidate('keyGeneratorType', value)"
 						@update:model-value="onSelectSshKeyType"
 					/>
@@ -429,6 +439,7 @@ watch(connectionType, () => {
 						size="large"
 						icon="refresh-cw"
 						data-test-id="source-control-refresh-ssh-key-button"
+						:disabled="isInitializing"
 						@click="refreshSshKey"
 					>
 						{{ locale.baseText('settings.sourceControl.refreshSshKey') }}
@@ -449,7 +460,7 @@ watch(connectionType, () => {
 			<N8nButton
 				v-if="!isConnected"
 				size="large"
-				:disabled="!validForConnection"
+				:disabled="isInitializing || !validForConnection"
 				:class="$style.connect"
 				data-test-id="source-control-connect-button"
 				@click="onConnect"
@@ -487,10 +498,11 @@ watch(connectionType, () => {
 							<N8nButton
 								variant="subtle"
 								iconOnly
-								size="small"
+								size="xlarge"
 								icon="refresh-cw"
-								:class="$style.refreshBranches"
+								:aria-label="locale.baseText('generic.refresh')"
 								data-test-id="source-control-refresh-branches-button"
+								:class="$style.refreshBranches"
 								@click="refreshBranches"
 							/>
 						</N8nTooltip>
@@ -646,9 +658,12 @@ watch(connectionType, () => {
 	}
 
 	button.refreshBranches {
-		height: 36px;
-		width: 36px;
 		margin-left: var(--spacing--xs);
+
+		svg {
+			width: 16px;
+			height: 16px;
+		}
 	}
 }
 </style>

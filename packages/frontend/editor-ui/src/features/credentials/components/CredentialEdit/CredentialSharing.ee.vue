@@ -15,10 +15,13 @@ import type {
 	ProjectSharingData,
 } from '@/features/collaboration/projects/projects.types';
 import { ProjectTypes } from '@/features/collaboration/projects/projects.types';
-import { splitName } from '@/features/collaboration/projects/projects.utils';
+import {
+	splitName,
+	useRemoteProjectSearch,
+} from '@/features/collaboration/projects/projects.utils';
 import type { EventBus } from '@n8n/utils/event-bus';
 import type { ICredentialDataDecryptedObject } from 'n8n-workflow';
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { getResourcePermissions } from '@n8n/permissions';
 
 import { N8nActionBox, N8nInfoTip } from '@n8n/design-system';
@@ -31,7 +34,10 @@ type Props = {
 	isSharedGlobally?: boolean;
 };
 
-const props = withDefaults(defineProps<Props>(), { credential: null, isSharedGlobally: false });
+const props = withDefaults(defineProps<Props>(), {
+	credential: null,
+	isSharedGlobally: false,
+});
 
 const emit = defineEmits<{
 	'update:modelValue': [value: ProjectSharingData[]];
@@ -70,13 +76,10 @@ const credentialDataHomeProject = computed<ProjectSharingData | undefined>(() =>
 		: undefined;
 });
 
-const projects = computed<ProjectListItem[]>(() => {
-	return projectsStore.projects.filter(
-		(project) =>
-			project.id !== props.credential?.homeProject?.id &&
-			project.id !== credentialDataHomeProject.value?.id,
-	);
-});
+const searchFn = useRemoteProjectSearch();
+const filterFn = (project: ProjectListItem) =>
+	project.id !== props.credential?.homeProject?.id &&
+	project.id !== credentialDataHomeProject.value?.id;
 
 const homeProject = computed<ProjectSharingData | undefined>(
 	() => props.credential?.homeProject ?? credentialDataHomeProject.value,
@@ -127,9 +130,7 @@ watch(
 	{ deep: true },
 );
 
-onMounted(async () => {
-	await projectsStore.getAllProjects();
-});
+// Projects are now fetched on demand via searchFn in ProjectSharing
 
 function goToUpgrade() {
 	void pageRedirectionHelper.goToUpgrade('credential_sharing', 'upgrade-credentials-sharing');
@@ -174,7 +175,8 @@ function goToUpgrade() {
 			</N8nInfoTip>
 			<ProjectSharing
 				v-model="sharedWithProjects"
-				:projects="projects"
+				:search-fn="searchFn"
+				:filter-fn="filterFn"
 				:roles="credentialRoles"
 				:home-project="homeProject"
 				:readonly="!credentialPermissions.share"
