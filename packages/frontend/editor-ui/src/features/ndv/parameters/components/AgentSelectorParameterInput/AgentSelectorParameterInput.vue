@@ -3,6 +3,7 @@ import type { ComponentPublicInstance } from 'vue';
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import type { EventBus } from '@n8n/utils/event-bus';
 import { createEventBus } from '@n8n/utils/event-bus';
+import { isPlaceholderValue } from '@n8n/utils/placeholder';
 import type {
 	INodeParameterResourceLocator,
 	INodeProperties,
@@ -11,6 +12,7 @@ import type {
 } from 'n8n-workflow';
 import { useI18n } from '@n8n/i18n';
 import { onClickOutside } from '@vueuse/core';
+import { useRouter } from 'vue-router';
 import DraggableTarget from '@/app/components/DraggableTarget.vue';
 import ExpressionParameterInput from '../ExpressionParameterInput.vue';
 import ResourceLocatorDropdown from '../ResourceLocator/ResourceLocatorDropdown.vue';
@@ -18,13 +20,23 @@ import ParameterIssues from '../ParameterIssues.vue';
 import { useResourceLocatorDropdown } from '../../composables/useResourceLocatorDropdown';
 import { useResourceLocatorModes } from '../../composables/useResourceLocatorModes';
 import { useAgentResourcesLocator } from '../../composables/useAgentResourcesLocator';
-import { useProjectsStore } from '@/features/collaboration/projects/projects.store';
+import { useAgentProjectNameResolver } from '@/features/agents/composables/useAgentProjectNameResolver';
 import { useAgentScopeProjectId } from '@/features/agents/composables/useAgentScopeProjectId';
+import { AGENT_BUILDER_VIEW } from '@/features/agents/constants';
 import { useDocumentVisibility } from '@/app/composables/useDocumentVisibility';
-import { useDebounce } from '@/app/composables/useDebounce';
+import { useDebounce } from '@n8n/composables/useDebounce';
 import { DEBOUNCE_TIME } from '@/app/constants';
+import { openSafeUrl } from '@/app/utils/htmlUtils';
 
-import { N8nButton, N8nIcon, N8nInput, N8nOption, N8nSelect, N8nText } from '@n8n/design-system';
+import {
+	N8nButton,
+	N8nIcon,
+	N8nInput,
+	N8nLink,
+	N8nOption,
+	N8nSelect,
+	N8nText,
+} from '@n8n/design-system';
 
 export interface Props {
 	modelValue: INodeParameterResourceLocator;
@@ -64,7 +76,7 @@ const emit = defineEmits<{
 }>();
 
 const i18n = useI18n();
-const projectStore = useProjectsStore();
+const router = useRouter();
 const { onDocumentVisible } = useDocumentVisibility();
 const { debounce } = useDebounce();
 
@@ -78,23 +90,9 @@ const width = ref(0);
 // so every surface reads/writes the same agent record.
 const projectId = useAgentScopeProjectId();
 
-// Resolve a project by id from the stores the picker already has loaded, so the
-// per-agent subtitle stays consistent with the `projectId` the catalog is
-// scoped to.
-function findProject(id: string) {
-	if (!id) return null;
-	if (projectStore.currentProject?.id === id) return projectStore.currentProject;
-	if (projectStore.personalProject?.id === id) return projectStore.personalProject;
-	return projectStore.myProjects.find((candidate) => candidate.id === id) ?? null;
-}
-
-function resolveProjectName(id: string): string | null {
-	// Only surface a project subtitle for non-personal team projects
-	if (!projectStore.isTeamProjectFeatureEnabled) return null;
-	const project = findProject(id);
-	if (!project || project.type === 'personal') return null;
-	return project.name ?? null;
-}
+// Resolve project subtitles from the stores the picker already has loaded, so
+// they stay consistent with the `projectId` the catalog is scoped to.
+const { resolveProjectName } = useAgentProjectNameResolver();
 
 const {
 	agentsResources,
@@ -121,15 +119,11 @@ const { hideDropdown, isDropdownVisible, showDropdown } = useResourceLocatorDrop
 );
 
 const valueToDisplay = computed<INodeParameterResourceLocator['value']>(() => {
-	if (typeof props.modelValue !== 'object') {
-		return props.modelValue ?? '';
-	}
-
-	if (isListMode.value) {
-		return props.modelValue ? (props.modelValue.cachedResultName ?? props.modelValue.value) : '';
-	}
-
-	return props.modelValue ? props.modelValue.value : '';
+	const value = typeof props.modelValue === 'object' ? props.modelValue?.value : props.modelValue;
+	const fallback = isPlaceholderValue(value) ? '' : (value ?? '');
+	return isListMode.value && typeof props.modelValue === 'object'
+		? (props.modelValue?.cachedResultName ?? fallback)
+		: fallback;
 });
 
 const placeholder = computed(() => {
@@ -139,6 +133,23 @@ const placeholder = computed(() => {
 
 	return i18n.baseText('resourceLocator.id.placeholder');
 });
+
+// Mirror the generic RLC's open-resource affordance: link the selected agent
+// to its builder page. Only a concrete list-mode selection can resolve — free
+// text / expressions in id mode may not reference a real agent.
+const agentUrl = computed(() => {
+	if (!isListMode.value || !projectId.value) return null;
+	const agentId = props.modelValue?.value;
+	if (typeof agentId !== 'string' || !agentId || isPlaceholderValue(agentId)) return null;
+	return router.resolve({
+		name: AGENT_BUILDER_VIEW,
+		params: { projectId: projectId.value, agentId },
+	}).href;
+});
+
+function openAgentLink() {
+	if (agentUrl.value) openSafeUrl(agentUrl.value);
+}
 
 function setWidth() {
 	const containerRef = container.value as HTMLElement | undefined;
@@ -215,7 +226,12 @@ async function refreshCachedAgent() {
 	// Read-only surfaces (execution preview, history) must never write the param.
 	if (props.isReadOnly) return;
 	const modelValue = props.modelValue;
-	if (modelValue?.mode !== 'list' || typeof modelValue.value !== 'string' || !modelValue.value) {
+	if (
+		modelValue?.mode !== 'list' ||
+		typeof modelValue.value !== 'string' ||
+		!modelValue.value ||
+		isPlaceholderValue(modelValue.value)
+	) {
 		return;
 	}
 	const freshName = await refreshAgentName(modelValue.value);
@@ -264,7 +280,10 @@ watch(
 	},
 );
 
-onClickOutside(dropdown, () => {
+onClickOutside(dropdown, (event) => {
+	if (event.target instanceof HTMLElement && dropdown.value?.isWithinDropdown(event.target)) {
+		return;
+	}
 	isDropdownVisible.value = false;
 });
 
@@ -291,6 +310,7 @@ defineExpose({ showDropdown });
 			:model-value="modelValue"
 			:disable-inactive-items="false"
 			@update:model-value="onListItemSelected"
+			@update:show="!$event && hideDropdown()"
 			@filter="onSearchFilter"
 			@load-more="loadMore"
 		>
@@ -300,7 +320,6 @@ defineExpose({ showDropdown });
 						{{ i18n.baseText('resourceLocator.mode.list.error.title') }}
 					</N8nText>
 					<N8nButton
-						type="tertiary"
 						size="small"
 						:label="i18n.baseText('generic.retry')"
 						data-test-id="rlc-error-retry"
@@ -402,6 +421,11 @@ defineExpose({ showDropdown });
 						:issues="parameterIssues"
 						:class="$style['parameter-issues']"
 					/>
+					<div v-else-if="agentUrl" :class="$style.openResourceLink">
+						<N8nLink theme="text" data-test-id="rlc-open-resource-link" @click.stop="openAgentLink">
+							<N8nIcon icon="external-link" :title="i18n.baseText('agentNode.card.openAgent')" />
+						</N8nLink>
+					</div>
 				</div>
 			</div>
 		</ResourceLocatorDropdown>

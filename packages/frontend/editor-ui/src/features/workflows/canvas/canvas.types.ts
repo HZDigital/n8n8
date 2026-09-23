@@ -9,17 +9,22 @@ import type {
 import type {
 	Connection,
 	DefaultEdge,
+	GraphNode,
 	Node,
 	NodeProps,
 	Position,
 	OnConnectStartParams,
 	ViewportTransform,
 } from '@vue-flow/core';
+import type { AgentCapabilitySummary } from '@n8n/api-types';
 import type { INodeUi } from '@/Interface';
 import type { IExecutionResponse } from '@/features/execution/executions/executions.types';
 import type { ComputedRef, Ref } from 'vue';
 import type { EventBus } from '@n8n/utils/event-bus';
-import type { CanvasLayoutSource } from '@/features/workflows/canvas/composables/useCanvasLayout';
+import type {
+	CanvasLayoutSource,
+	CanvasLayoutTarget,
+} from '@/features/workflows/canvas/composables/useCanvasLayout';
 import type { NodeIconSource } from '@/app/utils/nodeIcon';
 import type { ExecutionOutputMap, ExecutionOutputMapData } from '@/app/types/executionData';
 
@@ -106,9 +111,18 @@ export type CanvasNodeStickyNoteRender = {
 export type CanvasNodeAgentRender = {
 	type: CanvasNodeRenderType.Agent;
 	options: Partial<{
-		// The node's `agentId` resource-locator. Empty `value` => unconfigured
-		// card (shows the agent picker); set => rich card keyed by this agent.
+		// The node's `agentId` resource-locator — referenced mode only (ignored
+		// in inline mode). Empty `value` => unconfigured card (shows the agent
+		// picker); set => rich card keyed by this agent.
 		agentId: INodeParameterResourceLocator;
+		// 'inline' renders the card from `inlineSummary` below instead of
+		// fetching the referenced agent's capability summary.
+		agentSource: 'referenced' | 'inline';
+		// Pre-projected summary of the node's embedded agent definition (when
+		// agentSource is 'inline'). The card renders only name/model/tools, so
+		// the full inline config (instructions, embedded tool parameters) stays
+		// out of the render options.
+		inlineSummary: AgentCapabilitySummary;
 	}>;
 };
 
@@ -196,11 +210,16 @@ export interface CanvasGroupNodeData {
 	nodesRect: { x: number; y: number; width: number; height: number };
 	isCollapsed: boolean;
 	executionStatus?: GroupExecutionStatus;
+	allNodesDisabled?: boolean;
 }
 
 export type CanvasGroupNode = Node<CanvasGroupNodeData>;
 
 export type CanvasNodeOrGroup = CanvasNode | CanvasGroupNode;
+
+/** A rendered VueFlow node as auto-layout sees it: a regular node or a group node. */
+export type CanvasLayoutNode = GraphNode<CanvasNodeData> | GraphNode<CanvasGroupNodeData>;
+export type CanvasLayoutNodeData = CanvasNodeData | CanvasGroupNodeData;
 
 export function isCanvasGroupNode(node: CanvasNodeOrGroup): node is CanvasGroupNode;
 export function isCanvasGroupNode(node: { type?: string }): boolean;
@@ -262,6 +281,7 @@ export type CanvasEventBusEvents = {
 	};
 	tidyUp: {
 		source: CanvasLayoutSource;
+		target?: CanvasLayoutTarget;
 		nodeIdsFilter?: string[];
 		trackEvents?: boolean;
 		trackHistory?: boolean;

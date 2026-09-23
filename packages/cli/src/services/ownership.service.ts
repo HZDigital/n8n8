@@ -86,7 +86,10 @@ export class OwnershipService {
 	}
 
 	/**
-	 * Retrieve the project that owns the workflow. Note that workflow ownership is **immutable**.
+	 * Retrieve the project that owns the workflow. The result is cached. Workflow
+	 * ownership can change in bulk (e.g. when a user is deleted and their resources
+	 * are transferred), so any bulk owner change must invalidate this cache via
+	 * {@link invalidateWorkflowProjectCacheByIds} afterwards.
 	 */
 	async getWorkflowProjectCached(workflowId: string): Promise<Project> {
 		const cachedValue = await this.cacheService.getHashValue<Partial<Project>>(
@@ -163,6 +166,20 @@ export class OwnershipService {
 		);
 	}
 
+	/**
+	 * Invalidate the cached project for specific workflows. Use after a bulk
+	 * ownership change where the workflow IDs are already known and their
+	 * `workflow:owner` rows have moved to a different project.
+	 */
+	async invalidateWorkflowProjectCacheByIds(workflowIds: string[]): Promise<void> {
+		await Promise.all(
+			workflowIds.map(
+				async (workflowId) =>
+					await this.cacheService.deleteFromHash('workflow-project', workflowId),
+			),
+		);
+	}
+
 	addOwnedByAndSharedWith(
 		rawWorkflow: ListQueryDb.Workflow.WithSharing,
 	): ListQueryDb.Workflow.WithOwnedByAndSharedWith;
@@ -214,6 +231,9 @@ export class OwnershipService {
 	async getInstanceOwner() {
 		return await this.userRepository.findOneOrFail({
 			where: { role: { slug: GLOBAL_OWNER_ROLE.slug } },
+			// Permission checks read `user.role`. Without it, they show the owner
+			// less than they should, and report no error.
+			relations: ['role'],
 		});
 	}
 

@@ -5,6 +5,7 @@ import {
 	WorkflowTechnique,
 	type WorkflowTechniqueType,
 } from '@n8n/workflow-sdk/prompts/best-practices';
+import { GROUPING_GUIDANCE } from '@n8n/workflow-sdk/prompts/sdk-reference';
 import z from 'zod';
 
 import type { Telemetry } from '@/telemetry';
@@ -15,11 +16,13 @@ import type { ToolDefinition, UserCalledMCPToolEventPayload } from '../../mcp.ty
 
 const LIST_SENTINEL = 'list';
 
+const TECHNIQUE_CHOICES = [LIST_SENTINEL, ...Object.values(WorkflowTechnique)] as const;
+
 const inputSchema = {
 	technique: z
-		.union([z.nativeEnum(WorkflowTechnique), z.literal(LIST_SENTINEL)])
+		.enum(TECHNIQUE_CHOICES)
 		.describe(
-			`Workflow technique key (e.g. "chatbot", "scheduling", "triage") to fetch best-practices guidance for. Pass "${LIST_SENTINEL}" to discover all available techniques.`,
+			`Workflow technique key to fetch best-practices guidance for. Pass "${LIST_SENTINEL}" to discover all available techniques. One of: ${TECHNIQUE_CHOICES.join(', ')}.`,
 		),
 } satisfies z.ZodRawShape;
 
@@ -63,6 +66,8 @@ function buildListResponse() {
 			(t) =>
 				`- ${t.technique}${t.hasDocumentation ? '' : ' (no detailed documentation yet)'} — ${t.description}`,
 		),
+		'',
+		GROUPING_GUIDANCE,
 	].join('\n');
 
 	return {
@@ -108,7 +113,7 @@ export const createGetWorkflowBestPracticesTool = (
 	name: MCP_GET_WORKFLOW_BEST_PRACTICES_TOOL.toolName,
 	config: {
 		description:
-			'Required workflow-planning step. Get best-practices guidance (recommended nodes, patterns, and common pitfalls) for a specific workflow technique before searching for nodes or writing code. Call once per relevant technique. Use technique="list" first if unsure which techniques apply.',
+			'Required planning step when building a workflow, and only then. Get best-practices guidance (recommended nodes, patterns, and common pitfalls) for a specific workflow technique before searching for nodes or writing code. Call once per relevant technique. Use technique="list" first if unsure which techniques apply.',
 		inputSchema,
 		outputSchema,
 		annotations: {

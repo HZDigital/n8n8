@@ -20,7 +20,6 @@ import {
 import {
 	buildActionInputSchema,
 	buildContextInputSchema,
-	type RawActionToolInput,
 	type RawContextToolInput,
 	toSingleActionOperation,
 	toSingleContextOperation,
@@ -106,10 +105,9 @@ export function buildIntegrationConnectionId(integration: IntegrationToolConnect
 
 export function createIntegrationContextTool(params: {
 	descriptor: IntegrationToolConnectionDescriptor;
-	messageContextStore: IntegrationMessageContextStore;
 	queryExecutor: IntegrationContextQueryExecutor;
 }) {
-	const { descriptor, messageContextStore, queryExecutor } = params;
+	const { descriptor, queryExecutor } = params;
 
 	return new Tool(descriptor.contextToolName)
 		.description(buildContextToolDescription(descriptor))
@@ -118,16 +116,18 @@ export function createIntegrationContextTool(params: {
 			const toolInput = input as RawContextToolInput;
 			if (toolInput.queries !== undefined) {
 				const results = await Promise.all(
-					toolInput.queries.map(async (operation) => ({
-						query: operation.query,
-						result: await executeContextToolOperation({
-							operation,
-							descriptor,
-							messageContextStore,
-							queryExecutor,
-							persistence: ctx.persistence,
-						}),
-					})),
+					toolInput.queries.map(async (rawOperation) => {
+						const operation = toSingleContextOperation(rawOperation);
+						return {
+							query: operation.query,
+							result: await executeContextToolOperation({
+								operation,
+								descriptor,
+								queryExecutor,
+								persistence: ctx.persistence,
+							}),
+						};
+					}),
 				);
 
 				return { ok: true, results };
@@ -136,7 +136,6 @@ export function createIntegrationContextTool(params: {
 			return await executeContextToolOperation({
 				operation: toSingleContextOperation(toolInput),
 				descriptor,
-				messageContextStore,
 				queryExecutor,
 				persistence: ctx.persistence,
 			});
@@ -161,11 +160,11 @@ export function createIntegrationActionTool(params: {
 			}
 
 			const interruptCtx = ctx as InterruptibleToolContext;
-			const toolInput = input as RawActionToolInput;
+			const toolInput = input;
 
 			if (toolInput.actions !== undefined) {
 				return await executeActionToolBatch({
-					operations: toolInput.actions,
+					operations: toolInput.actions.map(toSingleActionOperation),
 					descriptor,
 					messageContextStore,
 					actionExecutor,

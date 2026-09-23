@@ -46,9 +46,13 @@ vi.mock('@/app/components/Modal.vue', () => ({
 }));
 
 vi.mock('@n8n/design-system', () => ({
-	N8nActionBox: {
+	N8nEmptyState: {
 		props: ['heading', 'description'],
 		template: '<div v-bind="$attrs">{{ heading }} {{ description }}</div>',
+	},
+	N8nCallout: {
+		props: ['theme'],
+		template: '<div v-bind="$attrs"><slot /></div>',
 	},
 	N8nButton: {
 		props: ['variant', 'size', 'disabled'],
@@ -65,10 +69,11 @@ vi.mock('@n8n/design-system', () => ({
 			'<input v-bind="$attrs" :value="modelValue" :placeholder="placeholder" @input="$emit(\'update:modelValue\', $event.target.value)" />',
 	},
 	N8nMarkdownEditor: {
-		props: ['modelValue'],
+		name: 'N8nMarkdownEditor',
+		props: ['modelValue', 'showToolbar'],
 		emits: ['update:modelValue'],
 		template:
-			'<textarea v-bind="$attrs" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
+			'<textarea v-bind="$attrs" :value="modelValue" :data-show-toolbar="showToolbar" @input="$emit(\'update:modelValue\', $event.target.value)" />',
 	},
 	N8nScrollArea: { template: '<div><slot /></div>', props: ['maxHeight', 'type'] },
 	N8nText: { template: '<span><slot /></span>', props: ['size', 'color', 'bold'] },
@@ -101,6 +106,11 @@ describe('AgentSubAgentsModal', () => {
 		await addButtons[1].trigger('click');
 
 		expect(wrapper.find('h2').text()).toBe('Research Agent');
+		expect(
+			wrapper
+				.get('[data-testid="agent-sub-agents-modal-use-when"]')
+				.attributes('data-show-toolbar'),
+		).toBe('floating');
 		const confirmButton = wrapper.find('[data-testid="agent-sub-agents-modal-confirm"]');
 		expect(confirmButton.attributes('disabled')).toBeUndefined();
 
@@ -237,6 +247,39 @@ describe('AgentSubAgentsModal', () => {
 
 		expect(onRemove).toHaveBeenCalledWith('agent-2');
 		expect(closeModalMock).toHaveBeenCalledWith('agentSubAgentsModal');
+	});
+
+	it('renders the invalid-reasons callout when opened with reasons', () => {
+		const wrapper = mount(AgentSubAgentsModal, {
+			props: {
+				modalName: 'agentSubAgentsModal',
+				data: {
+					selectedAgent: { id: 'agent-2', name: 'Billing Agent' },
+					invalidReasons: ["This agent isn't published yet."],
+					onConfirm: vi.fn(),
+				},
+			},
+		});
+
+		const callout = wrapper.find('[data-testid="agent-sub-agents-modal-invalid-callout"]');
+		expect(callout.exists()).toBe(true);
+		expect(callout.text()).toContain("This agent isn't published yet.");
+	});
+
+	it('omits the invalid-reasons callout when no reasons are given', () => {
+		const wrapper = mount(AgentSubAgentsModal, {
+			props: {
+				modalName: 'agentSubAgentsModal',
+				data: {
+					selectedAgent: { id: 'agent-2', name: 'Billing Agent' },
+					onConfirm: vi.fn(),
+				},
+			},
+		});
+
+		expect(wrapper.find('[data-testid="agent-sub-agents-modal-invalid-callout"]').exists()).toBe(
+			false,
+		);
 	});
 
 	it('shows an empty state when no agents are available', () => {

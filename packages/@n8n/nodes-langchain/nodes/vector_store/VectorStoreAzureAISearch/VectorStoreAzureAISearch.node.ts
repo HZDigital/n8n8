@@ -13,6 +13,8 @@ import { Document } from '@langchain/core/documents';
 import type { EmbeddingsInterface } from '@langchain/core/embeddings';
 import {
 	NodeOperationError,
+	OperationalError,
+	UnexpectedError,
 	type IDataObject,
 	type ILoadOptionsFunctions,
 	type INodeProperties,
@@ -202,7 +204,7 @@ interface AzureStoreInternals {
 function getAzureStoreInternals(vectorStore: AzureAISearchVectorStore): AzureStoreInternals {
 	const client = Reflect.get(vectorStore, 'client');
 	if (!client) {
-		throw new Error('Azure AI Search client is not initialized');
+		throw new UnexpectedError('Azure AI Search client is not initialized');
 	}
 
 	const initPromiseValue = Reflect.get(vectorStore, 'initPromise');
@@ -261,8 +263,8 @@ function applyVectorFieldOverrides(
 			String((entity as { id: string }).id),
 		);
 
-		bufferedClient.on('batchFailed', (response) => {
-			throw new Error(`Azure AI Search uploadDocuments batch failed: ${response}`);
+	bufferedClient.on('batchFailed', (response) => {
+			throw new OperationalError(`Azure AI Search uploadDocuments batch failed: ${response}`);
 		});
 
 		await bufferedClient.uploadDocuments(entities);

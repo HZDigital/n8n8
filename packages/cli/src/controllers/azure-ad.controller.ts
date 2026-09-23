@@ -5,7 +5,6 @@ import { AuthenticatedRequest } from '@n8n/db';
 import { Get, RestController } from '@n8n/decorators';
 import type { Response } from 'express';
 
-import { AuthService } from '@/auth/auth.service';
 import { AzureAdService } from '@/auth/azure-ad.service';
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { EventService } from '@/events/event.service';
@@ -48,7 +47,6 @@ export class AzureAdController {
 	constructor(
 		private readonly logger: Logger,
 		private readonly azureAdService: AzureAdService,
-		private readonly authService: AuthService,
 		private readonly eventService: EventService,
 		private readonly urlService: UrlService,
 	) {
@@ -133,7 +131,7 @@ export class AzureAdController {
 				throw new AuthError('Response object not available');
 			}
 
-			await issueCookie(req.res, user);
+			issueCookie(req.res, user);
 
 			this.logger.info('User successfully authenticated via Azure AD');
 			this.eventService.emit('user-logged-in', {
@@ -180,7 +178,7 @@ export class AzureAdController {
 				throw new AuthError('Response object not available');
 			}
 
-			await issueCookie(req.res, user);
+			issueCookie(req.res, user);
 
 			this.logger.info('User successfully authenticated via SSO');
 			this.eventService.emit('user-logged-in', {

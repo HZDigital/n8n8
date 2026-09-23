@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { DEFAULT_AGENT_PERSONALISATION } from '@n8n/api-types';
 import { N8nIconPicker, N8nInlineTextEdit } from '@n8n/design-system';
-import type { IconOrEmoji } from '@n8n/design-system/components/N8nIconPicker/types';
+import type { IconOrEmoji } from '@n8n/design-system';
 import { useI18n } from '@n8n/i18n';
 
 import type { AgentJsonConfig } from '../types';
@@ -67,10 +67,13 @@ function personalisationStyle(value: AgentPersonalisation): Record<string, strin
 </script>
 
 <template>
-	<div :class="$style.text" data-testid="agent-identity-header">
+	<div
+		:class="$style.text"
+		:style="personalisationStyle(personalisation)"
+		data-testid="agent-identity-header"
+	>
 		<N8nIconPicker
 			v-model="iconPickerModel"
-			:style="personalisationStyle(personalisation)"
 			:button-tooltip="i18n.baseText('agents.builder.agent.personalisation.change')"
 			button-size="xlarge"
 			:is-read-only="props.disabled"
@@ -99,7 +102,7 @@ function personalisationStyle(value: AgentPersonalisation): Record<string, strin
 	display: flex;
 	flex-direction: column;
 	align-items: flex-start;
-	gap: var(--spacing--sm);
+	gap: var(--spacing--md);
 	flex: 1;
 	min-width: 0;
 }
@@ -107,6 +110,7 @@ function personalisationStyle(value: AgentPersonalisation): Record<string, strin
 .personalisationPicker {
 	width: 64px;
 	height: 64px;
+	overflow: visible;
 }
 
 .personalisationIcon.personalisationIcon {
@@ -135,32 +139,68 @@ function personalisationStyle(value: AgentPersonalisation): Record<string, strin
 	background: transparent;
 	position: relative;
 	isolation: isolate;
+	overflow: visible;
+	filter: drop-shadow(0 8px 8px var(--shadow-color));
 
 	&:disabled {
 		cursor: default;
 		opacity: 0.7;
 	}
+
+	&:focus-visible {
+		outline: none;
+	}
+
+	&:focus-visible::before,
+	&[aria-expanded='true']::before {
+		background-color: var(--focus--border-color);
+	}
+
+	&:focus-visible::after,
+	&[aria-expanded='true']::after {
+		inset: 2px;
+	}
+}
+
+.personalisationIcon::before,
+.personalisationIcon::after {
+	content: '';
+	position: absolute;
+	-webkit-mask: var(--agent-personalisation-squircle-mask) center / contain no-repeat;
+	mask: var(--agent-personalisation-squircle-mask) center / contain no-repeat;
 }
 
 .personalisationIcon::before {
-	content: '';
-	position: absolute;
 	inset: 0;
+	background: var(--color--black-alpha-200);
+	z-index: 0;
+}
+
+.personalisationIcon::after {
+	inset: 0.5px;
 	background: linear-gradient(
 		var(--agent-personalisation-gradient-angle),
 		var(--agent-personalisation-gradient-from) var(--agent-personalisation-gradient-from-stop),
 		var(--agent-personalisation-gradient-to) var(--agent-personalisation-gradient-to-stop)
 	);
-	-webkit-mask: var(--agent-personalisation-squircle-mask) center / contain no-repeat;
-	mask: var(--agent-personalisation-squircle-mask) center / contain no-repeat;
-	z-index: 0;
-	filter: drop-shadow(0 4px 6px var(--shadow-color));
+	z-index: 1;
+}
+
+@supports (background: linear-gradient(90deg in oklch, red, blue)) {
+	.personalisationIcon::after {
+		background: linear-gradient(
+			var(--agent-personalisation-gradient-angle) in oklch,
+			var(--agent-personalisation-gradient-from) var(--agent-personalisation-gradient-from-stop),
+			var(--agent-personalisation-gradient-to) var(--agent-personalisation-gradient-to-stop)
+		);
+	}
 }
 
 .personalisationIcon > *,
 .personalisationIcon :global(.n8n-icon) {
 	position: relative;
-	z-index: 1;
+	z-index: 2;
+	filter: drop-shadow(0 8px 8px var(--shadow-color));
 }
 
 .personalisationIcon.personalisationIcon :global(svg) {
@@ -171,7 +211,7 @@ function personalisationStyle(value: AgentPersonalisation): Record<string, strin
 }
 
 .title {
-	font-size: var(--font-size--xl);
+	font-size: var(--font-size--2xl);
 	font-weight: var(--font-weight--medium);
 	line-height: var(--line-height--lg);
 	text-align: left;

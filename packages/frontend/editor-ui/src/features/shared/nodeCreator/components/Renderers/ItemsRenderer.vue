@@ -7,6 +7,7 @@ import NodeItem from '../ItemTypes/NodeItem.vue';
 import SubcategoryItem from '../ItemTypes/SubcategoryItem.vue';
 import LabelItem from '../ItemTypes/LabelItem.vue';
 import ActionItem from '../ItemTypes/ActionItem.vue';
+import AgentItem from '../ItemTypes/AgentItem.vue';
 import ViewItem from '../ItemTypes/ViewItem.vue';
 import LinkItem from '../ItemTypes/LinkItem.vue';
 import CommunityNodeItem from '../ItemTypes/CommunityNodeItem.vue';
@@ -192,7 +193,7 @@ watch(
 					<NodeItem
 						v-if="item.type === 'node' && !communityNode"
 						:node-type="item.properties"
-						:active="true"
+						:active="activeItemId === item.uuid"
 						:subcategory="item.subcategory"
 					/>
 
@@ -202,6 +203,8 @@ watch(
 						:action="item.properties"
 						:active="true"
 					/>
+
+					<AgentItem v-if="item.type === 'agent'" :agent="item.properties" />
 
 					<ViewItem
 						v-else-if="item.type === 'view'"
@@ -231,6 +234,8 @@ watch(
 </template>
 
 <style lang="scss" module>
+@use '@/app/css/variables' as *;
+
 .itemSkeleton {
 	height: 50px;
 }

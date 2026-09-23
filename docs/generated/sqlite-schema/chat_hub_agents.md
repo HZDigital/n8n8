@@ -73,6 +73,7 @@ erDiagram
 "credentials_entity" {
   datetime_3_ createdAt
   TEXT data
+  TEXT description
   varchar_36_ id PK
   boolean isGlobal
   boolean isManaged
@@ -82,6 +83,7 @@ erDiagram
   varchar_16_ resolverId FK
   varchar_32_ type
   datetime_3_ updatedAt
+  VARCHAR_16_ usageScope
 }
 "chat_hub_agent_tools" {
   varchar agentId PK

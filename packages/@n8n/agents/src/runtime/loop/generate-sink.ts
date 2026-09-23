@@ -9,6 +9,7 @@ import type {
 import { classifyModelTurnError } from './runtime-helpers';
 import type { GenerateResult } from '../../types';
 import type { ToolResultEntry } from '../../types/sdk/agent';
+import { isAttachmentValidationError } from '../model/attachment-validation-error';
 import { loadAi } from '../model/lazy-ai';
 import { fromAiFinishReason, fromAiMessages } from '../model/messages';
 import { toTokenUsage } from '../streaming/stream';
@@ -31,13 +32,19 @@ export class GenerateSink implements RunOutputSink<GenerateResult> {
 		const { generateText } = loadAi();
 		const result = await generateText({
 			model: ctx.model,
-			system: ctx.system,
+			instructions: ctx.system,
 			messages: ctx.messages,
+			allowSystemInMessages: true,
 			abortSignal: ctx.abortSignal,
+			...(ctx.reasoning ? { reasoning: ctx.reasoning } : {}),
 			...(ctx.hasTools ? { tools: ctx.aiTools } : {}),
 			...(ctx.providerOptions ? { providerOptions: ctx.providerOptions } : {}),
 			...(ctx.outputSpec ? { output: ctx.outputSpec } : {}),
+			...(ctx.maxOutputTokens !== undefined ? { maxOutputTokens: ctx.maxOutputTokens } : {}),
 			...ctx.aiSdkOptions,
+		}).catch(async (error: unknown) => {
+			if (isAttachmentValidationError(error)) await ctx.onInputRejected?.(error);
+			throw error;
 		});
 
 		const aiFinishReason = result.finishReason;

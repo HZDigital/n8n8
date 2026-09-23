@@ -4,6 +4,7 @@ import { isAuthProviderType, SettingsRepository, type AuthProviderType } from '@
 import { Container } from '@n8n/di';
 
 import config from '@/config';
+import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 
 /**
  * Only one authentication method can be active at a time. This function sets
@@ -97,6 +98,18 @@ export function isAzureAdCurrentAuthenticationMethod(): boolean {
 
 export function isAzureAdForceAuthenticationEnabled(): boolean {
 	return Container.get(GlobalConfig).azureAd.forceAuthentication;
+}
+
+/** Only one authentication method (`email` or a single SSO method) can be active at a time. */
+export function assertAuthenticationMethodCanBeEnabled(
+	method: Extract<AuthProviderType, 'ldap' | 'saml' | 'oidc'>,
+): void {
+	const currentAuthenticationMethod = getCurrentAuthenticationMethod();
+	if (currentAuthenticationMethod !== 'email' && currentAuthenticationMethod !== method) {
+		throw new BadRequestError(
+			`Cannot switch ${method} login enabled state when an authentication method other than email or ${method} is active (current: ${currentAuthenticationMethod})`,
+		);
+	}
 }
 
 export function isSsoJustInTimeProvisioningEnabled(): boolean {

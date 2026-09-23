@@ -5,6 +5,31 @@ import Switch from './Switch.vue';
 
 describe('components/N8nSwitch', () => {
 	describe('rendering', () => {
+		it('should forward attributes without Vue warnings', () => {
+			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+			try {
+				const wrapper = render(Switch, {
+					attrs: {
+						class: 'custom-switch',
+						'aria-describedby': 'switch-description',
+					},
+				});
+
+				const warnings = warnSpy.mock.calls.flat().join(' ');
+				expect(warnings).not.toContain(
+					'toRefs() expects a reactive object but received a plain one',
+				);
+				expect(wrapper.container.firstElementChild).toHaveClass('custom-switch');
+				expect(wrapper.getByRole('switch')).toHaveAttribute(
+					'aria-describedby',
+					'switch-description',
+				);
+			} finally {
+				warnSpy.mockRestore();
+			}
+		});
+
 		it('should render unchecked by default', () => {
 			const wrapper = render(Switch);
 			const switchEl = wrapper.container.querySelector('[role="switch"]');
@@ -245,6 +270,14 @@ describe('components/N8nSwitch', () => {
 			const label = wrapper.container.querySelector('label');
 			expect(switchEl).toHaveAttribute('id', 'test-switch');
 			expect(label).toHaveAttribute('for', 'test-switch');
+		});
+
+		it('should preserve an explicit accessible label', () => {
+			const wrapper = render(Switch, {
+				attrs: { 'aria-label': 'Pause schedule' },
+			});
+
+			expect(wrapper.getByRole('switch', { name: 'Pause schedule' })).toBeInTheDocument();
 		});
 
 		it('should be keyboard accessible with Space', async () => {

@@ -1,14 +1,21 @@
 <script setup lang="ts" generic="T = string, D = never">
 import { useDebounceFn } from '@vueuse/core';
-import { computed, nextTick, ref, useId, watch } from 'vue';
+import { computed, inject, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue';
 
-import type { DropdownMenuItemProps, DropdownMenuSlots } from './DropdownMenu.types';
+import {
+	DropdownMenuExternalNavigationKey,
+	type DropdownMenuExternalNavigationController,
+	type DropdownMenuItemProps,
+	type DropdownMenuSearchMode,
+	type DropdownMenuSlots,
+} from './DropdownMenu.types';
 import {
 	getItemDomId as getSearchableItemDomId,
 	getNextValidIndex,
 	hasSubMenu,
 	isInputCursorAtEnd,
 	isInputCursorAtStart,
+	isNavigableItem,
 	scrollHighlightedItemIntoView,
 } from './DropdownMenu.utils';
 import N8nDropdownMenuSearch from './DropdownMenuSearch.vue';
@@ -21,10 +28,14 @@ const props = withDefaults(
 		items: Array<DropdownMenuItemProps<T, D>>;
 		searchPlaceholder?: string;
 		searchDebounce?: number;
+		searchMode?: DropdownMenuSearchMode;
+		isSubMenu?: boolean;
 	}>(),
 	{
 		searchPlaceholder: 'Search...',
 		searchDebounce: 0,
+		searchMode: 'internal',
+		isSubMenu: false,
 	},
 );
 
@@ -32,6 +43,7 @@ const emit = defineEmits<{
 	select: [value: T];
 	search: [searchTerm: string, itemId?: T];
 	close: [];
+	back: [];
 	'submenu:toggle': [itemId: T, open: boolean];
 }>();
 
@@ -53,12 +65,18 @@ const searchRef = ref<{ focus: (options?: FocusOptions) => void } | null>(null);
 const searchTerm = ref('');
 const openSubMenuIndex = ref(-1);
 const instanceId = useId();
+const externalNavigation = inject(DropdownMenuExternalNavigationKey, null);
 let searchSequence = 0;
+let unregisterExternalNavigation: (() => void) | undefined;
 
 const highlightedIndex = ref(-1);
 
-const refocusSearchInput = () => {
-	searchRef.value?.focus({ preventScroll: true });
+const refocusNavigationTarget = () => {
+	if (props.searchMode === 'external') {
+		externalNavigation?.focusTarget();
+	} else {
+		searchRef.value?.focus({ preventScroll: true });
+	}
 };
 
 const scrollHighlightedItem = () => {
@@ -67,7 +85,7 @@ const scrollHighlightedItem = () => {
 	// so re-apply it on the next frame.
 	requestAnimationFrame(() => {
 		scrollHighlightedItemIntoView(itemsContainerRef.value);
-		refocusSearchInput();
+		refocusNavigationTarget();
 	});
 };
 
@@ -84,13 +102,16 @@ const navigate = async (direction: 'up' | 'down') => {
 	scrollHighlightedItem();
 };
 
-const openHighlightedSubMenu = () => {
-	if (highlightedIndex.value < 0) return;
+const openHighlightedSubMenu = (): boolean => {
+	if (highlightedIndex.value < 0) return false;
 
 	const item = props.items[highlightedIndex.value];
 	if (item && !item.disabled && hasSubMenu(item)) {
 		handleSubMenuOpenChange(highlightedIndex.value, true);
+		return true;
 	}
+
+	return false;
 };
 
 const resetHighlightedItem = () => {
@@ -105,7 +126,7 @@ const updateHighlightedItem = (
 
 	const highlightedItem = oldItems[highlightedIndex.value];
 	const newIndex = newItems.findIndex((item) => item.id === highlightedItem?.id);
-	highlightedIndex.value = newItems[newIndex]?.disabled ? -1 : newIndex;
+	highlightedIndex.value = isNavigableItem(newItems[newIndex]) ? newIndex : -1;
 };
 
 const debouncedEmitSearch = useDebounceFn((term: string, sequence: number) => {
@@ -134,6 +155,10 @@ const resetNavigation = () => {
 	openSubMenuIndex.value = -1;
 };
 
+const highlightFirstItem = () => {
+	highlightedIndex.value = getNextValidIndex(props.items, -1, 1);
+};
+
 const handleSubMenuOpenChange = (index: number, open: boolean) => {
 	const item = props.items[index];
 	if (item) {
@@ -147,22 +172,24 @@ const handleSubMenuOpenChange = (index: number, open: boolean) => {
 		openSubMenuIndex.value = -1;
 		void nextTick(() => {
 			highlightedIndex.value = index;
-			refocusSearchInput();
+			refocusNavigationTarget();
 		});
 	}
 };
 
-const selectHighlightedItem = () => {
-	if (highlightedIndex.value < 0) return;
+const selectHighlightedItem = (): boolean => {
+	if (highlightedIndex.value < 0) return false;
 
 	const item = props.items[highlightedIndex.value];
-	if (!item || item.disabled) return;
+	if (!isNavigableItem(item)) return false;
 
-	if (hasSubMenu(item)) {
-		handleSubMenuOpenChange(highlightedIndex.value, true);
+	if (hasSubMenu(item) && !item.selectable) {
+		return openHighlightedSubMenu();
 	} else {
 		emit('select', item.id);
-		emit('close');
+		// Toggle-style rows (keepOpen) stay open on keyboard select, matching click.
+		if (!item.keepOpen) emit('close');
+		return true;
 	}
 };
 
@@ -174,12 +201,13 @@ const closeOpenSubMenu = () => {
 
 const handleItemHover = (index: number) => {
 	const item = props.items[index];
-	if (!item || item.disabled) return;
+	if (!isNavigableItem(item)) return;
 
 	highlightedIndex.value = index;
+	externalNavigation?.activate(externalNavigationController);
 
 	requestAnimationFrame(() => {
-		refocusSearchInput();
+		refocusNavigationTarget();
 	});
 };
 
@@ -190,6 +218,8 @@ const activeDescendantId = computed(() =>
 );
 
 const handleSearchKeydown = (event: KeyboardEvent) => {
+	if (event.isComposing || event.keyCode === 229) return;
+
 	switch (event.key) {
 		case 'Escape':
 			event.preventDefault();
@@ -233,12 +263,66 @@ const handleSearchKeydown = (event: KeyboardEvent) => {
 	}
 };
 
+const handleExternalKeydown = (event: KeyboardEvent): boolean => {
+	if (props.searchMode !== 'external' || !props.open) return false;
+	if (event.isComposing || event.keyCode === 229) return false;
+
+	switch (event.key) {
+		case 'ArrowDown':
+			if (!props.items.some(isNavigableItem)) return false;
+			event.preventDefault();
+			void navigate('down');
+			return true;
+
+		case 'ArrowUp':
+			if (highlightedIndex.value < 0) return false;
+			event.preventDefault();
+			if (highlightedIndex.value > 0) void navigate('up');
+			return true;
+
+		case 'ArrowRight':
+			if (!openHighlightedSubMenu()) return false;
+			event.preventDefault();
+			return true;
+
+		case 'ArrowLeft':
+			if (!props.isSubMenu) return false;
+			event.preventDefault();
+			emit('back');
+			return true;
+
+		case 'Enter':
+			if (!selectHighlightedItem()) return false;
+			event.preventDefault();
+			return true;
+
+		default:
+			return false;
+	}
+};
+
+const externalNavigationController: DropdownMenuExternalNavigationController = {
+	handleExternalKeydown,
+	highlightFirstItem,
+	getActiveDescendantId: () => activeDescendantId.value,
+};
+
+const registerExternalNavigation = () => {
+	if (unregisterExternalNavigation || !externalNavigation) return;
+	unregisterExternalNavigation = externalNavigation.register(externalNavigationController);
+};
+
+const unregisterNavigation = () => {
+	unregisterExternalNavigation?.();
+	unregisterExternalNavigation = undefined;
+};
+
 watch(
 	() => props.open,
 	(open) => {
 		if (open) {
 			void nextTick(() => {
-				refocusSearchInput();
+				refocusNavigationTarget();
 			});
 		} else {
 			resetNavigation();
@@ -249,18 +333,39 @@ watch(
 );
 
 watch(
+	[() => props.open, () => props.searchMode],
+	([open, searchMode]) => {
+		if (open && searchMode === 'external') {
+			registerExternalNavigation();
+		} else {
+			unregisterNavigation();
+		}
+	},
+	{ immediate: true },
+);
+
+watch(activeDescendantId, () => {
+	if (props.searchMode === 'external' && props.open) {
+		externalNavigation?.syncActiveDescendant();
+	}
+});
+
+watch(
 	() => props.items,
 	(newItems, oldItems) => {
 		updateHighlightedItem(newItems, oldItems);
 	},
 );
 
-defineExpose({ resetNavigation });
+onBeforeUnmount(unregisterNavigation);
+
+defineExpose({ resetNavigation, highlightFirstItem });
 </script>
 
 <template>
 	<div :class="$style.content" @keydown.capture="handleSearchKeydown">
 		<N8nDropdownMenuSearch
+			v-if="searchMode === 'internal'"
 			ref="searchRef"
 			:model-value="searchTerm"
 			:placeholder="searchPlaceholder"
@@ -292,6 +397,7 @@ defineExpose({ resetNavigation });
 .content {
 	display: flex;
 	flex-direction: column;
+	min-height: 0;
 	max-height: inherit;
 }
 

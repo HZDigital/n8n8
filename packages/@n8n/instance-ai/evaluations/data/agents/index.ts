@@ -1,25 +1,16 @@
-import type { WorkflowTestCase } from '../../types';
+// ---------------------------------------------------------------------------
+// Author Agent-focused cases here and run them with `--tier agents`.
+// Process expectations grade the conversation. Outcome expectations grade the
+// built Agent. Execution scenarios can run the Agent with mocked tools. The
+// corpus lives in the LangTracer `agents` suite. Author a case here, calibrate
+// it, push it, and delete the local file. Requires the agents module.
+// ---------------------------------------------------------------------------
+
 import { loadEvalCasesFromDir, type WorkflowTestCaseWithFile } from '../../utils/load-eval-cases';
-
-const INTENT_CLASSIFICATION_PREAMBLE = [
-	'This is not a request to build or execute anything. Do not create workflows, do not create agents, and do not run anything.',
-	'I only want you to classify the intent of this hypothetical request:',
-].join('\n');
-
-function withIntentClassificationPreamble(testCase: WorkflowTestCase): WorkflowTestCase {
-	return {
-		...testCase,
-		conversation: testCase.conversation?.map((turn, index) =>
-			index === 0 && turn.role === 'user'
-				? { ...turn, text: [INTENT_CLASSIFICATION_PREAMBLE, turn.text].join('\n') }
-				: turn,
-		),
-	};
-}
 
 export function loadAgentEvalTestCasesWithFiles(
 	filter?: string,
 	exclude?: string,
 ): WorkflowTestCaseWithFile[] {
-	return loadEvalCasesFromDir(__dirname, filter, exclude, withIntentClassificationPreamble);
+	return loadEvalCasesFromDir(__dirname, filter, exclude);
 }

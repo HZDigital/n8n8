@@ -362,7 +362,7 @@ describe('generate-types', () => {
 	beforeAll(async () => {
 		// Dynamic import to handle module not existing yet
 		try {
-			generateTypes = await import('../generate-types/generate-types');
+			generateTypes = await import('../generate-types/generate-types.js');
 		} catch {
 			// Module doesn't export functions yet - tests will fail as expected in TDD
 		}
@@ -2050,6 +2050,38 @@ describe('generate-types', () => {
 			expect(result).toContain('@builderHint AI Agent — wire subnodes via the config object');
 		});
 
+		it('should mark a hidden node as deprecated above its description', () => {
+			const node = { ...mockGmailNode, hidden: true };
+
+			const result = generateTypes.generateNodeJSDoc(node);
+
+			expect(result).toContain('@deprecated');
+			expect(result).toContain('Do not use it in a new workflow');
+			// The reader must meet the marker before the parameters.
+			expect(result.indexOf('@deprecated')).toBeLessThan(
+				result.indexOf('Send and receive emails using Gmail'),
+			);
+		});
+
+		it('should name the replacement node from the builder hint of a hidden node', () => {
+			const node = {
+				...mockGmailNode,
+				hidden: true,
+				builderHint: { searchHint: 'Use `n8n-nodes-base.httpRequestTool` instead.' },
+			};
+
+			const result = generateTypes.generateNodeJSDoc(node);
+
+			expect(result).toContain('@deprecated');
+			expect(result).toContain('@builderHint Use `n8n-nodes-base.httpRequestTool` instead.');
+		});
+
+		it('should not mark a visible node as deprecated', () => {
+			const result = generateTypes.generateNodeJSDoc(mockGmailNode);
+
+			expect(result).not.toContain('@deprecated');
+		});
+
 		it('should emit unconditional extraTypeDefContent variations at the file header but skip gated ones', () => {
 			const node = {
 				...mockGmailNode,
@@ -2192,6 +2224,111 @@ describe('generate-types', () => {
 			expect(generateTypes.propertyAppliesToVersion(prop, 1.9)).toBe(true);
 			expect(generateTypes.propertyAppliesToVersion(prop, 2.1)).toBe(false);
 			expect(generateTypes.propertyAppliesToVersion(prop, 3)).toBe(false);
+		});
+
+		it('should handle eq (equal) version condition', () => {
+			const prop: NodeProperty = {
+				name: 'modelName',
+				displayName: 'Model',
+				type: 'options',
+				default: 'models/gemini-2.5-flash',
+				displayOptions: {
+					show: {
+						'@version': [{ _cnd: { eq: 1 } }],
+					},
+				},
+			};
+			expect(generateTypes.propertyAppliesToVersion(prop, 1)).toBe(true);
+			expect(generateTypes.propertyAppliesToVersion(prop, 1.1)).toBe(false);
+			expect(generateTypes.propertyAppliesToVersion(prop, 2)).toBe(false);
+		});
+
+		it('should handle not (not equal) version condition', () => {
+			const prop: NodeProperty = {
+				name: 'text',
+				displayName: 'Text',
+				type: 'string',
+				default: '',
+				displayOptions: {
+					show: {
+						'@version': [{ _cnd: { not: 2 } }],
+					},
+				},
+			};
+			expect(generateTypes.propertyAppliesToVersion(prop, 1)).toBe(true);
+			expect(generateTypes.propertyAppliesToVersion(prop, 2)).toBe(false);
+			expect(generateTypes.propertyAppliesToVersion(prop, 2.1)).toBe(true);
+		});
+
+		it('should handle between version condition', () => {
+			const prop: NodeProperty = {
+				name: 'text',
+				displayName: 'Text',
+				type: 'string',
+				default: '',
+				displayOptions: {
+					show: {
+						'@version': [{ _cnd: { between: { from: 2, to: 3 } } }],
+					},
+				},
+			};
+			expect(generateTypes.propertyAppliesToVersion(prop, 2)).toBe(true);
+			expect(generateTypes.propertyAppliesToVersion(prop, 2.5)).toBe(true);
+			expect(generateTypes.propertyAppliesToVersion(prop, 3)).toBe(true);
+			expect(generateTypes.propertyAppliesToVersion(prop, 1.9)).toBe(false);
+			expect(generateTypes.propertyAppliesToVersion(prop, 3.1)).toBe(false);
+		});
+	});
+
+	describe('filterPropertiesForVersion with per-version default overrides', () => {
+		// The light-versioning pattern: the same property is declared twice with
+		// version-gated defaults (e.g. LmChatGoogleGemini's modelName). An `eq`
+		// gate that isn't enforced leaks the old property into newer versions'
+		// typedefs, where the emitter keeps the first (old) duplicate.
+		const oldDefault: NodeProperty = {
+			name: 'modelName',
+			displayName: 'Model',
+			type: 'options',
+			default: 'models/old-model',
+			displayOptions: {
+				show: {
+					'@version': [{ _cnd: { eq: 1 } }],
+				},
+			},
+		};
+		const newDefault: NodeProperty = {
+			...oldDefault,
+			default: 'models/new-model',
+			displayOptions: {
+				show: {
+					'@version': [{ _cnd: { gte: 1.1 } }],
+				},
+			},
+		};
+
+		it('should keep only the matching duplicate for each version', () => {
+			const v1 = generateTypes.filterPropertiesForVersion([oldDefault, newDefault], 1);
+			expect(v1.map((p) => p.default)).toEqual(['models/old-model']);
+
+			const v11 = generateTypes.filterPropertiesForVersion([oldDefault, newDefault], 1.1);
+			expect(v11.map((p) => p.default)).toEqual(['models/new-model']);
+		});
+
+		it('should emit the version-correct @default in the generated type file', () => {
+			const node: NodeTypeDescription = {
+				name: '@n8n/n8n-nodes-langchain.lmChatExample',
+				displayName: 'Example Chat Model',
+				description: 'Example',
+				group: ['transform'],
+				version: [1, 1.1],
+				inputs: [],
+				outputs: ['ai_languageModel'],
+				properties: [oldDefault, newDefault],
+			};
+
+			const content = generateTypes.generateSingleVersionTypeFile(node, 1.1);
+			expect(content).toContain('@default models/new-model');
+			expect(content).not.toContain('@default models/old-model');
 		});
 	});
 
@@ -2572,9 +2709,22 @@ describe('generate-types', () => {
 			expect(result).toContain("'httpHeaderAuth'");
 			expect(result).toContain("'httpQueryAuth'");
 			expect(result).toContain("'httpCustomAuth'");
+			expect(result).toContain("'httpTemplatedCustomAuth'");
 			expect(result).toContain("'oAuth1Api'");
 			expect(result).toContain("'oAuth2Api'");
 			expect(result).toContain('Expression<string>');
+		});
+
+		it('should emit steering JSDoc for genericAuthType', () => {
+			const prop: NodeProperty = {
+				name: 'genericAuthType',
+				displayName: 'Generic Auth Type',
+				type: 'credentialsSelect',
+				default: '',
+			};
+			const line = generateTypes.generatePropertyLine(prop, true);
+			expect(line).toContain('httpTemplatedCustomAuth');
+			expect(line).toContain('do NOT use httpBearerAuth');
 		});
 
 		it('should NOT skip credentialsSelect properties in type generation', () => {
@@ -5033,6 +5183,137 @@ describe('generate-types', () => {
 			}
 		});
 
+		it('exact-matches fractional typeVersions against minor-versioned dirs', () => {
+			const nodeName = '__TestMinorVersionExact__';
+			const schema = { type: 'object', properties: { id: { type: 'string' } } };
+
+			try {
+				createTestSchemaDir(nodeName, 'v2.0.0', {
+					'contact/get.json': JSON.stringify({ type: 'object', properties: {} }),
+				});
+				createTestSchemaDir(nodeName, 'v2.3.0', {
+					'contact/get.json': JSON.stringify(schema),
+				});
+
+				const result = generateTypes.discoverSchemasForNode(
+					`n8n-nodes-base.${nodeName}`,
+					2.3,
+					nodeName,
+				);
+
+				expect(result).toHaveLength(1);
+				expect(result[0].schema).toEqual(schema);
+			} finally {
+				cleanupTestDir(nodeName);
+			}
+		});
+
+		it('falls back to the closest LOWER version comparing full X.Y.Z tuples', () => {
+			const nodeName = '__TestMinorVersionFallback__';
+			const older = { type: 'object', properties: { a: { type: 'string' } } };
+			const closest = { type: 'object', properties: { b: { type: 'string' } } };
+			const newer = { type: 'object', properties: { c: { type: 'string' } } };
+
+			try {
+				createTestSchemaDir(nodeName, 'v2.0.0', { 'contact/get.json': JSON.stringify(older) });
+				createTestSchemaDir(nodeName, 'v2.2.0', { 'contact/get.json': JSON.stringify(closest) });
+				createTestSchemaDir(nodeName, 'v2.4.0', { 'contact/get.json': JSON.stringify(newer) });
+
+				// 2.3 has no exact dir: must pick v2.2.0 (closest lower), never v2.4.0.
+				const result = generateTypes.discoverSchemasForNode(
+					`n8n-nodes-base.${nodeName}`,
+					2.3,
+					nodeName,
+				);
+
+				expect(result).toHaveLength(1);
+				expect(result[0].schema).toEqual(closest);
+			} finally {
+				cleanupTestDir(nodeName);
+			}
+		});
+
+		it('resolves to a higher same-major minor before dropping to an older major', () => {
+			const nodeName = '__TestSameMajorAbove__';
+			const v1Schema = { type: 'object', properties: { legacy: { type: 'string' } } };
+			const v22Schema = { type: 'object', properties: { current: { type: 'string' } } };
+
+			try {
+				// The Notion shape: node versions 2 and 2.1 share the class behind
+				// v2.2.0 — falling to v1.0.0 would silently lose their schemas.
+				createTestSchemaDir(nodeName, 'v1.0.0', {
+					'contact/get.json': JSON.stringify(v1Schema),
+				});
+				createTestSchemaDir(nodeName, 'v2.2.0', {
+					'contact/get.json': JSON.stringify(v22Schema),
+				});
+
+				for (const version of [2, 2.1]) {
+					const result = generateTypes.discoverSchemasForNode(
+						`n8n-nodes-base.${nodeName}`,
+						version,
+						nodeName,
+					);
+
+					expect(result).toHaveLength(1);
+					expect(result[0].schema).toEqual(v22Schema);
+				}
+			} finally {
+				cleanupTestDir(nodeName);
+			}
+		});
+
+		it('fills gaps per file from lower minors when the exact dir is sparse', () => {
+			const nodeName = '__TestPerFileFallback__';
+			const searchSchema = { type: 'object', properties: { matches: { type: 'array' } } };
+			const postSchema = { type: 'object', properties: { ts: { type: 'string' } } };
+			const stalePostSchema = { type: 'object', properties: { old: { type: 'boolean' } } };
+
+			try {
+				// The Slack shape: v2.7.0 exists but only holds message/search.json,
+				// while v2.3.0 holds message/post.json — post must resolve from v2.3.0.
+				createTestSchemaDir(nodeName, 'v2.3.0', {
+					'message/post.json': JSON.stringify(postSchema),
+					'message/search.json': JSON.stringify(stalePostSchema),
+				});
+				createTestSchemaDir(nodeName, 'v2.7.0', {
+					'message/search.json': JSON.stringify(searchSchema),
+				});
+
+				const result = generateTypes.discoverSchemasForNode(
+					`n8n-nodes-base.${nodeName}`,
+					2.7,
+					nodeName,
+				);
+
+				expect(result).toHaveLength(2);
+				expect(result.find((s) => s.operation === 'search')?.schema).toEqual(searchSchema);
+				expect(result.find((s) => s.operation === 'post')?.schema).toEqual(postSchema);
+			} finally {
+				cleanupTestDir(nodeName);
+			}
+		});
+
+		it('never falls forward to a newer major', () => {
+			const nodeName = '__TestNoNewerMajor__';
+
+			try {
+				createTestSchemaDir(nodeName, 'v3.0.0', {
+					'contact/get.json': JSON.stringify({ type: 'object' }),
+				});
+
+				const result = generateTypes.discoverSchemasForNode(
+					`n8n-nodes-base.${nodeName}`,
+					2,
+					nodeName,
+				);
+
+				expect(result).toHaveLength(0);
+			} finally {
+				cleanupTestDir(nodeName);
+			}
+		});
+
 		it('discovers both root-level JSON files and resource subdirectories', () => {
 			const nodeName = '__TestMixedNodeBoth__';
 			const rootSchema = { type: 'object', properties: { id: { type: 'string' } } };
@@ -5067,6 +5348,52 @@ describe('generate-types', () => {
 				});
 			} finally {
 				cleanupTestDir(nodeName);
+			}
+		});
+
+		it('matches schema folders case-insensitively (chainLlm -> ChainLLM)', () => {
+			const nodeName = '__testchainllm__';
+			const schema = { type: 'object', properties: { text: { type: 'string' } } };
+
+			try {
+				createTestSchemaDir('Nested/__TESTCHAINLLM__', 'v1.9.0', {
+					'output.json': JSON.stringify(schema),
+				});
+
+				const result = generateTypes.discoverSchemasForNode(
+					`@n8n/n8n-nodes-langchain.${nodeName}`,
+					1.9,
+				);
+
+				expect(result).toHaveLength(1);
+				expect(result[0].schema).toEqual(schema);
+			} finally {
+				cleanupTestDir('Nested');
+			}
+		});
+
+		it('discovers schemas from the current package before falling back to nodes-base', () => {
+			const nodeName = '__TestOwnPackageSchema__';
+			const ownSchema = { type: 'object', properties: { output: { type: 'object' } } };
+			const packageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-root-test-'));
+			const originalCwd = process.cwd();
+
+			try {
+				const schemaDir = path.join(packageDir, 'dist/nodes/chains', nodeName, '__schema__/v1.2.0');
+				fs.mkdirSync(schemaDir, { recursive: true });
+				fs.writeFileSync(path.join(schemaDir, 'output.json'), JSON.stringify(ownSchema));
+
+				process.chdir(packageDir);
+				const result = generateTypes.discoverSchemasForNode(
+					`@n8n/n8n-nodes-langchain.${nodeName}`,
+					1.2,
+				);
+
+				expect(result).toHaveLength(1);
+				expect(result[0]).toEqual({ resource: '', operation: 'output', schema: ownSchema });
+			} finally {
+				process.chdir(originalCwd);
+				fs.rmSync(packageDir, { recursive: true, force: true });
 			}
 		});
 
@@ -5171,7 +5498,7 @@ describe('orchestrateGeneration', () => {
 	let mod: typeof GenerateTypesModule;
 
 	beforeAll(async () => {
-		mod = await import('../generate-types/generate-types');
+		mod = await import('../generate-types/generate-types.js');
 		// Cold module compilation can exceed the default 10s hook timeout on a
 		// loaded CI runner, so give the import ample headroom.
 	}, 30_000);

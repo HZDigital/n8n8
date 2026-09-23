@@ -1,6 +1,10 @@
+import { extractJsonCandidate } from '@n8n/ai-utilities/llm-output';
 import { Logger } from '@n8n/backend-common';
 import { Container } from '@n8n/di';
 import { createEvalAgent, extractText } from '@n8n/instance-ai';
+// AI root node types (single source in @n8n/workflow-sdk mock-data) — lets
+// the typo guard accept a no-sub-node Agent.
+import { isAiRootNodeType } from '@n8n/workflow-sdk';
 import {
 	findAiRootNodeNames,
 	type INode,
@@ -14,20 +18,7 @@ import {
 import { buildDateAnchors } from './date-anchors';
 import { extractNodeConfig } from './node-config';
 
-/**
- * AI root node types — lets the typo guard accept a no-sub-node Agent.
- * Keep in sync with new agent/chain types in `@n8n/n8n-nodes-langchain`.
- */
-const AI_ROOT_NODE_TYPES = new Set<string>([
-	'@n8n/n8n-nodes-langchain.agent',
-	'@n8n/n8n-nodes-langchain.chainLlm',
-	'@n8n/n8n-nodes-langchain.chainRetrievalQa',
-	'@n8n/n8n-nodes-langchain.chainSummarization',
-]);
-
-export function isAiRootNodeType(nodeType: string): boolean {
-	return AI_ROOT_NODE_TYPES.has(nodeType);
-}
+export { isAiRootNodeType };
 
 /** Sources of `ai_*` connections — LLM/tool/memory sub-nodes. Handled via their root, never pinned individually. */
 function findAiSubNodeNames(workflow: IWorkflowBase): Set<string> {
@@ -70,6 +61,17 @@ function isVendorLlmSubNode(nodeType: string): boolean {
 	return nodeType.startsWith('@n8n/n8n-nodes-langchain.lm');
 }
 
+/** `embeddings*` nodes bake the vendor base URL into the SDK, exactly as `lm*` do. */
+function isVendorEmbeddingsSubNode(nodeType: string): boolean {
+	return nodeType.startsWith('@n8n/n8n-nodes-langchain.embeddings');
+}
+
+/** Sub-nodes the HTTP mock never sees: only a credential URL rewrite intercepts them. */
+export function isVendorSdkSubNode(nodeType: string | undefined): boolean {
+	if (!nodeType) return false;
+	return isVendorLlmSubNode(nodeType) || isVendorEmbeddingsSubNode(nodeType);
+}
+
 /** MCP registry nodes talk via the MCP SDK's own transport, not n8n's HTTP helper — the mock can't reach them, so their root must stay pinned. */
 function isMcpRegistryNode(nodeType: string): boolean {
 	return nodeType.startsWith('@n8n/mcp-registry.');
@@ -104,7 +106,12 @@ const PROTOCOL_BINARY_SUB_NODE_TYPES = new Set([
  * verification runs, so scenario outcomes become a coin flip on build-phase leftovers. */
 const DATA_TABLE_READ_OPERATIONS = new Set(['get', 'rowExists', 'rowNotExists']);
 
-function isDataTableRead(node: INode): boolean {
+/** Of the read operations, only `get` emits stored rows — `rowExists`/`rowNotExists`
+ *  return the input item passed straight through, so the table's column contract
+ *  does not describe their output. */
+const DATA_TABLE_ROW_EMITTING_OPERATIONS = new Set(['get']);
+
+export function isDataTableRead(node: INode): boolean {
 	if (node.type !== 'n8n-nodes-base.dataTable') return false;
 	const params = node.parameters as { resource?: string; operation?: string } | undefined;
 	// Node defaults: resource 'row', operation 'insert' (a write) — only pin explicit reads.
@@ -112,6 +119,15 @@ function isDataTableRead(node: INode): boolean {
 		(params?.resource ?? 'row') === 'row' &&
 		DATA_TABLE_READ_OPERATIONS.has(params?.operation ?? 'insert')
 	);
+}
+
+/** True for Data Table reads whose output IS stored rows — the only reads a real
+ *  column contract applies to. Still pinned like any other read; they just get
+ *  prompt-only generation instead of enforced column names. */
+export function emitsDataTableRows(node: INode): boolean {
+	if (!isDataTableRead(node)) return false;
+	const params = node.parameters as { operation?: string } | undefined;
+	return DATA_TABLE_ROW_EMITTING_OPERATIONS.has(params?.operation ?? 'insert');
 }
 
 /** Returns nodes that need pin data — AI roots (unless in `exclusionSet`), bypass-protocol nodes, and Data Table reads. */
@@ -286,6 +302,7 @@ export function detectBinaryDependencies(
 export type AutoPinReason =
 	| 'protocol_binary'
 	| 'unsupported_vendor_llm'
+	| 'unsupported_vendor_embeddings'
 	| 'unsafe_baseurl_override'
 	| 'shared_vendor_llm_subnode';
 
@@ -511,7 +528,7 @@ function trackSharedSupportedSubNodes(
  * Return the auto-pin reason for a sub-node, or null if it's safe to intercept.
  * Order: protocol-binary (HTTP can't reach it) → shared (attribution ambiguous) →
  * supported-vendor-with-baseURL-override (SDK bypasses the rewrite) → unsupported
- * vendor LLM (no URL-rewrite mapping yet).
+ * vendor LLM or embeddings (no URL-rewrite mapping yet).
  */
 function categorizeSubNodeIncompatibility(
 	sourceNode: INode,
@@ -524,6 +541,12 @@ function categorizeSubNodeIncompatibility(
 		return hasUnsafeBaseUrlOverride(sourceNode) ? 'unsafe_baseurl_override' : null;
 	}
 	if (isVendorLlmSubNode(sourceNode.type)) return 'unsupported_vendor_llm';
+	// No `EVAL_PROVIDER_URL_FIELD` entry rewrites an embeddings credential, so
+	// `applyServerUrlRewrite` hands back the original one and the SDK reaches
+	// the real provider on real credentials. The un-intercepted warning is
+	// raised only after that request, which is too late to stop the spend.
+	// Pin the root until `/v1/embeddings` has a wire-server route.
+	if (isVendorEmbeddingsSubNode(sourceNode.type)) return 'unsupported_vendor_embeddings';
 	return null;
 }
 
@@ -555,6 +578,8 @@ export interface MockHints {
 	triggerContent: Record<string, unknown>;
 	/** For multi-trigger workflows: the trigger node the scenario targets (Phase-1 LLM's pick). */
 	startNodeName?: string;
+	/** The scenario says the trigger has nothing to emit; the harness pins it to zero items. */
+	triggerEmitsNoItems?: boolean;
 	/** Errors encountered during hint generation or mock execution */
 	warnings: string[];
 	/** Pin data for nodes that bypass the HTTP mock layer (AI roots, protocol nodes) */
@@ -577,7 +602,7 @@ RULES:
    - For service-specific triggers (Gmail Trigger, Slack Trigger, etc.): match the service's real event/message output format
    - For schedule triggers: include timestamp fields
    - For manual triggers: include the fields that downstream nodes reference
-   - CRITICAL: triggerContent must NEVER be an empty object ({}). Even for scenarios that test empty payloads ("empty submission", "no data", "missing fields"), emit the trigger envelope with empty *nested* fields — an empty webhook is { headers: {}, query: {}, body: {} }, a schedule with no context is { timestamp: "..." }. The workflow cannot execute without trigger output.
+   - CRITICAL: triggerContent must NEVER be an empty object ({}). Even for scenarios that test empty payloads ("empty submission", "no data", "missing fields"), emit the trigger envelope with empty *nested* fields — an empty webhook is { headers: {}, query: {}, body: {} }, a schedule with no context is { timestamp: "..." }. The workflow cannot execute without trigger output. The one exception is a polling or event trigger that the scenario says has NOTHING to emit ("no new emails", "no new rows", "no results"): then set "triggerEmitsNoItems": true and omit triggerContent — the harness pins the trigger to zero items so downstream nodes do not run.
    - CRITICAL: check what downstream nodes reference (e.g., $json.body.email, $json.subject, $json.text) and ensure those paths exist in triggerContent
    - CRITICAL: when the workflow has MULTIPLE trigger nodes, pick the ONE the Test Scenario targets (the trigger whose firing the scenario describes, e.g. "The weekly Schedule Trigger fires") and return its exact node name in a "startNodeName" field. triggerContent must be THAT trigger's output.
    - CRITICAL: triggerContent must NEVER contain binary file CONTENT — no base64 blobs, no fake file-bytes placeholders. When the trigger carries a file (form upload, email attachment, incoming media), declare it with a METADATA-ONLY binary map instead: "binary": { "<propertyKey>": { "mimeType": "<real MIME>", "fileName": "<name.ext>" } } — the harness synthesizes real file bytes from that metadata and attaches them at the item level. The MIME type and file name MUST match the scenario: an image/png upload scenario needs mimeType "image/png" and a .png fileName, never a generic application/octet-stream. Use "data" as the propertyKey unless downstream nodes reference a different binary property name.
@@ -634,6 +659,9 @@ function buildUserPrompt(
 		'  "startNodeName": "exact trigger node name the scenario targets (only when the workflow has multiple triggers)",',
 	);
 	sections.push('  "triggerContent": { "...exact output the trigger node would produce..." },');
+	sections.push(
+		'  "triggerEmitsNoItems": "true only when the scenario says the trigger emits nothing; then omit triggerContent",',
+	);
 	sections.push('  "nodeHints": {');
 	for (let i = 0; i < Math.min(nodeNames.length, 3); i++) {
 		const comma = i < Math.min(nodeNames.length, 3) - 1 ? ',' : '';
@@ -695,11 +723,7 @@ export async function generateMockHints(options: GenerateMockHintsOptions): Prom
 				abortSignal: AbortSignal.timeout(HINT_LLM_TIMEOUT_MS),
 			});
 
-			const text = extractText(result)
-				.replace(/^```(?:json)?\s*\n?/i, '')
-				.replace(/\n?\s*```\s*$/i, '')
-				.trim();
-
+			const text = extractJsonCandidate(extractText(result));
 			const parsed: Record<string, unknown> = jsonParse(text);
 
 			// globalContext may come back as a string or object — normalize to string
@@ -723,7 +747,10 @@ export async function generateMockHints(options: GenerateMockHintsOptions): Prom
 					!Array.isArray(parsed.triggerContent)
 						? parsed.triggerContent
 						: {};
-				if (Object.keys(triggerContent).length === 0) {
+				// The model answers a bool as a word often enough to read both spellings.
+				const triggerEmitsNoItems =
+					parsed.triggerEmitsNoItems === true || parsed.triggerEmitsNoItems === 'true';
+				if (Object.keys(triggerContent).length === 0 && !triggerEmitsNoItems) {
 					reason = 'empty triggerContent';
 				} else {
 					// Coerce nodeHints values to strings — LLM may return objects instead of strings
@@ -738,6 +765,7 @@ export async function generateMockHints(options: GenerateMockHintsOptions): Prom
 						...(typeof parsed.startNodeName === 'string' && parsed.startNodeName.length > 0
 							? { startNodeName: parsed.startNodeName }
 							: {}),
+						...(triggerEmitsNoItems ? { triggerEmitsNoItems: true } : {}),
 						warnings,
 						bypassPinData: {},
 					};

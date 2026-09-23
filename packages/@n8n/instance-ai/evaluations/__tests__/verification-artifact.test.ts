@@ -1,7 +1,7 @@
 import type { InstanceAiEvalExecutionResult, InstanceAiEvalNodeResult } from '@n8n/api-types';
 
 import type { WorkflowResponse } from '../clients/n8n-client';
-import { buildVerificationArtifact, selectScenarioWorkflowId } from '../harness/runner';
+import { buildVerificationArtifact, selectScenarioWorkflowId } from '../harness/scenario-execution';
 import type { ExecutionScenario } from '../types';
 
 function makeNodeResult(
@@ -216,6 +216,120 @@ describe('buildVerificationArtifact', () => {
 		expect(logger.info).not.toHaveBeenCalled();
 	});
 
+	it('routes to the entry point when the build saved a sub-workflow first', () => {
+		// Sub-workflow tool-result arrives first → build.workflowId is the sub.
+		// Executing it directly starts once with an empty payload; the caller's
+		// entry point is the trigger-bearing sibling.
+		const logger = { info: vi.fn() };
+		const sub: WorkflowResponse = {
+			id: 'process-order-sub',
+			name: 'Process Order',
+			active: false,
+			versionId: 'v1',
+			nodes: [
+				{
+					id: 'a',
+					name: 'Execute Workflow Trigger',
+					type: 'n8n-nodes-base.executeWorkflowTrigger',
+					typeVersion: 1,
+					position: [0, 0],
+					parameters: {},
+				},
+			],
+			connections: {},
+		};
+		const main: WorkflowResponse = {
+			id: 'orders-main',
+			name: 'Order Intake',
+			active: false,
+			versionId: 'v1',
+			nodes: [
+				{
+					id: 'b',
+					name: 'Webhook',
+					type: 'n8n-nodes-base.webhook',
+					typeVersion: 1,
+					position: [0, 0],
+					parameters: {},
+				},
+				{
+					id: 'c',
+					name: 'Run Process Order',
+					type: 'n8n-nodes-base.executeWorkflow',
+					typeVersion: 1,
+					position: [0, 0],
+					parameters: { workflowId: { value: 'process-order-sub' } },
+				},
+			],
+			connections: {},
+		};
+
+		const selected = selectScenarioWorkflowId(
+			{ ...scenario, name: 'three-orders-three-runs', dataSetup: 'Process Order runs three times' },
+			'process-order-sub',
+			[sub, main],
+			logger as never,
+		);
+
+		expect(selected).toBe('orders-main');
+		expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('orders-main'));
+	});
+
+	it('demotes executeWorkflow-referenced candidates even when scenario tokens favor the sub', () => {
+		const logger = { info: vi.fn() };
+		const sub: WorkflowResponse = {
+			id: 'sub-with-own-trigger',
+			name: 'Process Order',
+			active: false,
+			versionId: 'v1',
+			nodes: [
+				{
+					id: 'a',
+					name: 'Process Order Webhook',
+					type: 'n8n-nodes-base.webhook',
+					typeVersion: 1,
+					position: [0, 0],
+					parameters: {},
+				},
+			],
+			connections: {},
+		};
+		const main: WorkflowResponse = {
+			id: 'orders-main',
+			name: 'Order Intake',
+			active: false,
+			versionId: 'v1',
+			nodes: [
+				{
+					id: 'b',
+					name: 'Webhook',
+					type: 'n8n-nodes-base.webhook',
+					typeVersion: 1,
+					position: [0, 0],
+					parameters: {},
+				},
+				{
+					id: 'c',
+					name: 'Run Sub',
+					type: 'n8n-nodes-base.executeWorkflow',
+					typeVersion: 1,
+					position: [0, 0],
+					parameters: { workflowId: 'sub-with-own-trigger' },
+				},
+			],
+			connections: {},
+		};
+
+		const selected = selectScenarioWorkflowId(
+			{ ...scenario, name: 'process-order-runs', dataSetup: 'Process Order handles each order' },
+			'orders-main',
+			[main, sub],
+			logger as never,
+		);
+
+		expect(selected).toBe('orders-main');
+	});
+
 	it('labels Filter branches with downstream node names so verifier can tell where items went', () => {
 		const wf: WorkflowResponse = {
 			id: 'w1',
@@ -427,6 +541,44 @@ describe('buildVerificationArtifact', () => {
 		expect(artifact.scenarioContext).toContain('**Did not run** (no execution data): none');
 	});
 
+	// TRUST-508: verifiers read a model sub-node's absence as "the harness did not
+	// mock it" and charged the root's own crash to the mock layer.
+	it('tells the verifier what a sub-node under "Did not run" means', () => {
+		const wf: WorkflowResponse = {
+			id: 'w1',
+			name: 'extractor',
+			active: false,
+			versionId: 'v1',
+			nodes: [
+				{
+					id: 'a',
+					name: 'Extract Jobs',
+					type: '@n8n/n8n-nodes-langchain.informationExtractor',
+					typeVersion: 1.2,
+					position: [0, 0],
+					parameters: {},
+				},
+				{
+					id: 'b',
+					name: 'OpenAI Model',
+					type: '@n8n/n8n-nodes-langchain.lmChatOpenAi',
+					typeVersion: 1,
+					position: [0, 0],
+					parameters: {},
+				},
+			],
+			connections: { 'OpenAI Model': { ai_languageModel: [[{ node: 'Extract Jobs', index: 0 }]] } },
+		};
+		const evalResult = makeEvalResult({
+			'Extract Jobs': makeNodeResult({ executionMode: 'real', iterationCount: 1 }),
+		});
+
+		const artifact = buildVerificationArtifact(scenario, evalResult, [wf]);
+
+		expect(artifact.scenarioContext).toContain('**Did not run** (no execution data): OpenAI Model');
+		expect(artifact.scenarioContext).toContain('NOT that the harness declined to mock it');
+	});
+
 	it('head/tail-truncates oversized JSON output blocks and reports chars saved', () => {
 		const wf: WorkflowResponse = {
 			id: 'w1',
@@ -488,6 +640,7 @@ describe('buildVerificationArtifact', () => {
 				interceptedRequests: Array.from({ length: 30 }, (_, i) => ({
 					method: 'GET',
 					url: `https://api.example.com/page/${i}`,
+					nodeType: 'n8n-nodes-base.httpRequest',
 					mockResponse: { page: i },
 				})),
 				iterationCount: 1,
