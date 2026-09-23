@@ -50,6 +50,7 @@ erDiagram
 "public.credentials_entity" {
   timestamp_3__with_time_zone createdAt
   text data
+  text description
   varchar_36_ id
   boolean isGlobal
   boolean isManaged
@@ -59,6 +60,7 @@ erDiagram
   varchar_16_ resolverId FK
   varchar_128_ type
   timestamp_3__with_time_zone updatedAt
+  varchar_16_ usageScope
 }
 "public.dynamic_credential_entry" {
   timestamp_3__with_time_zone createdAt

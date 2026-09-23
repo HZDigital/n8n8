@@ -1,5 +1,6 @@
 import moment from 'moment-timezone';
 import type { IDataObject, ILoadOptionsFunctions, INodePropertyOptions } from 'n8n-workflow';
+import { toPathSegment } from 'n8n-workflow';
 
 import { extractPageId, getBlockTypesOptions } from '../../shared/GenericFunctions';
 import { splitPropertyKey } from '../helpers/utils';
@@ -123,10 +124,14 @@ export async function getUsers(this: ILoadOptionsFunctions): Promise<INodeProper
 async function getParentDataSourceIdFromPage(
 	this: ILoadOptionsFunctions,
 ): Promise<string | undefined> {
-	const pageId = extractPageId(
-		this.getCurrentNodeParameter('pageId', { extractValue: true }) as string,
-	);
-	const page = await notionApiRequestV3.call(this, 'GET', `/pages/${pageId}`);
+	const pageIdValue = this.getCurrentNodeParameter('pageId', { extractValue: true }) as
+		| string
+		| null;
+	const pageId = extractPageId(pageIdValue ?? '');
+	if (!pageId) {
+		return undefined;
+	}
+	const page = await notionApiRequestV3.call(this, 'GET', `/pages/${toPathSegment(pageId)}`);
 	if (!isDataObject(page) || !isDataObject(page.parent)) {
 		return undefined;
 	}

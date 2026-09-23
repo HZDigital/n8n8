@@ -4,7 +4,7 @@ import type {
 	INodeExecutionData,
 	INodeProperties,
 } from 'n8n-workflow';
-import { NodeOperationError, setSafeObjectProperty } from 'n8n-workflow';
+import { toPathSegment, NodeOperationError, setSafeObjectProperty } from 'n8n-workflow';
 
 import { dataSourceSearchFilterDescriptions, mapDataSourceFilters } from './DataSourceFilters';
 import { downloadFiles, type FileRecord } from '../../../shared/GenericFunctions';
@@ -408,6 +408,7 @@ export const description: INodeProperties[] = [
 		name: 'title',
 		type: 'string',
 		default: '',
+		required: true,
 		displayOptions: { show: { resource: ['databasePage'], operation: ['create'] } },
 		description: 'Page title',
 	},
@@ -572,7 +573,7 @@ export async function get(this: IExecuteFunctions, items: INodeExecutionData[]) 
 			let response: IDataObject | IDataObject[] = await notionApiRequestV3.call(
 				this,
 				'GET',
-				`/pages/${getPageId.call(this, i)}`,
+				`/pages/${toPathSegment(getPageId.call(this, i))}`,
 			);
 			const download = this.getNodeParameter('options.downloadFiles', i, false) as boolean;
 			const simple = this.getNodeParameter('simple', i) as boolean;
@@ -632,7 +633,7 @@ export async function getAll(this: IExecuteFunctions, items: INodeExecutionData[
 				this,
 				'results',
 				'POST',
-				`/data_sources/${dataSourceId}/query`,
+				`/data_sources/${toPathSegment(dataSourceId)}/query`,
 				body,
 				limit ? { limit } : {},
 			);
@@ -677,7 +678,7 @@ export async function update(this: IExecuteFunctions, items: INodeExecutionData[
 			let response: IDataObject | IDataObject[] = await notionApiRequestV3.call(
 				this,
 				'PATCH',
-				`/pages/${getPageId.call(this, i)}`,
+				`/pages/${toPathSegment(getPageId.call(this, i))}`,
 				body,
 			);
 			if (this.getNodeParameter('simple', i) as boolean)

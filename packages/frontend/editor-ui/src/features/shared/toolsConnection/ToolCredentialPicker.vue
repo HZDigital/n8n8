@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, ref, watch } from 'vue';
-import { N8nButton, N8nIcon, N8nInput, N8nPopover, N8nText } from '@n8n/design-system';
+import { N8nButton, N8nIcon, N8nInput, N8nPopover, N8nSpinner, N8nText } from '@n8n/design-system';
 import { useI18n } from '@n8n/i18n';
 import {
+	hasToolConnection,
 	TOOL_CONNECTION_CREDENTIAL_ADAPTER_KEY,
 	type ToolConnectionItem,
 	type ToolCredentialRef,
@@ -13,14 +14,19 @@ const props = withDefaults(
 		item: ToolConnectionItem;
 		credentials: ToolCredentialRef[];
 		connectVariant?: 'solid' | 'outline';
+		teleported?: boolean;
 	}>(),
 	{
 		connectVariant: 'solid',
+		teleported: false,
 	},
 );
 
 const emit = defineEmits<{
 	'select-credential': [item: ToolConnectionItem, authType: string, credentialId: string];
+	'credential-dropdown-open': [item: ToolConnectionItem];
+	'first-credential-connect': [item: ToolConnectionItem];
+	'new-credential-connect': [item: ToolConnectionItem];
 }>();
 
 const i18n = useI18n();
@@ -35,8 +41,6 @@ const selectedCredentialIds = computed(() =>
 	props.credentials.map((c) => c.credentialId).filter((id): id is string => Boolean(id)),
 );
 
-const isConnected = computed(() => selectedCredentialIds.value.length > 0);
-
 const availableCredentials = computed(() => {
 	if (!adapter) return [];
 	return props.credentials.flatMap((cred) =>
@@ -44,8 +48,19 @@ const availableCredentials = computed(() => {
 			id: c.id,
 			name: c.name,
 			authType: cred.authType,
+			authDisplayName: cred.displayName,
 		})),
 	);
+});
+
+const statusLabel = computed(() => {
+	if (props.item.status === 'connected') {
+		return i18n.baseText('tools.connection.action.connected');
+	}
+	if (props.item.status === 'disconnected') {
+		return i18n.baseText('tools.connection.action.reconnect');
+	}
+	return '';
 });
 
 const filteredCredentials = computed(() => {
@@ -56,6 +71,7 @@ const filteredCredentials = computed(() => {
 
 watch(isOpen, (open) => {
 	if (open) {
+		emit('credential-dropdown-open', props.item);
 		searchQuery.value = '';
 		void nextTick(() => {
 			(searchInputRef.value?.$el as HTMLElement | undefined)
@@ -70,13 +86,26 @@ function pickCredential(authType: string, credentialId: string) {
 	isOpen.value = false;
 }
 
-const createAuthType = computed(
-	() => props.credentials.find((c) => c.required)?.authType ?? props.credentials[0]?.authType,
+const creatableCredentials = computed(() =>
+	props.credentials.filter(
+		(credential, index, credentials) =>
+			credentials.findIndex(({ authType }) => authType === credential.authType) === index,
+	),
 );
 
-function createCredential() {
-	if (!createAuthType.value) return;
-	adapter?.openNewCredential(createAuthType.value);
+function createCredential(authType: string, source: 'direct' | 'dropdown') {
+	if (!authType) return;
+	if (source === 'direct') {
+		emit('first-credential-connect', props.item);
+	} else {
+		emit('new-credential-connect', props.item);
+	}
+	const credentialTypes =
+		creatableCredentials.value.length > 1
+			? creatableCredentials.value.map((credential) => credential.authType)
+			: undefined;
+
+	adapter?.openNewCredential(authType, props.item, credentialTypes);
 	isOpen.value = false;
 }
 
@@ -87,26 +116,53 @@ function editCredential(credentialId: string) {
 </script>
 
 <template>
+	<span
+		v-if="item.status === 'connecting'"
+		:class="$style.statusMarker"
+		data-test-id="tool-credential-picker-trigger-connecting"
+	>
+		<N8nSpinner size="small" />
+		{{ i18n.baseText('tools.connection.action.connecting') }}
+	</span>
 	<N8nPopover
-		v-if="isConnected || availableCredentials.length > 0"
+		v-else-if="
+			hasToolConnection(item.status) ||
+			availableCredentials.length > 0 ||
+			creatableCredentials.length > 1
+		"
 		v-model:open="isOpen"
 		side="bottom"
 		align="end"
 		:side-offset="6"
 		:width="'260px'"
-		:teleported="false"
+		:teleported="teleported"
 		:z-index="2000"
 		data-test-id="tool-credential-picker"
 	>
 		<template #trigger>
-			<button
-				v-if="isConnected"
-				type="button"
-				:class="$style.connectedPill"
-				data-test-id="tool-credential-picker-trigger-connected"
+			<N8nButton
+				v-if="item.status === 'disconnected'"
+				variant="outline"
+				size="small"
+				data-test-id="tool-credential-picker-trigger-disconnected"
 			>
-				<span :class="$style.statusDot" aria-hidden="true" />
-				<span>{{ i18n.baseText('tools.connection.action.connected') }}</span>
+				<N8nIcon
+					icon="circle-x"
+					:size="14"
+					:class="$style.statusIconDisconnected"
+					aria-hidden="true"
+				/>
+				<span>{{ statusLabel }}</span>
+				<N8nIcon icon="chevron-down" :size="12" />
+			</N8nButton>
+			<button
+				v-else-if="hasToolConnection(item.status)"
+				type="button"
+				:class="$style.statusPill"
+				:data-test-id="`tool-credential-picker-trigger-${item.status}`"
+			>
+				<N8nIcon icon="check" :size="14" :class="$style.statusIconConnected" aria-hidden="true" />
+				<span>{{ statusLabel }}</span>
 				<N8nIcon icon="chevron-down" :size="12" />
 			</button>
 			<N8nButton
@@ -150,7 +206,15 @@ function editCredential(credentialId: string) {
 					:data-auth-type="cred.authType"
 					@click="pickCredential(cred.authType, cred.id)"
 				>
-					<span :class="$style.rowLabel">{{ cred.name }}</span>
+					<span :class="$style.rowLabel">
+						{{ cred.name }}
+						<small
+							v-if="creatableCredentials.length > 1 && cred.authDisplayName"
+							:class="$style.authLabel"
+						>
+							{{ cred.authDisplayName }}
+						</small>
+					</span>
 					<span :class="$style.rowActions">
 						<span :class="$style.rowCheck" aria-hidden="true">
 							<N8nIcon v-if="selectedCredentialIds.includes(cred.id)" icon="check" :size="14" />
@@ -169,11 +233,11 @@ function editCredential(credentialId: string) {
 				</li>
 			</ul>
 			<button
-				v-if="createAuthType"
+				v-if="creatableCredentials[0]"
 				type="button"
 				:class="$style.createRow"
 				data-test-id="tool-credential-picker-create"
-				@click="createCredential"
+				@click="createCredential(creatableCredentials[0].authType, 'dropdown')"
 			>
 				<N8nIcon icon="plus" :size="14" />
 				<span>{{ i18n.baseText('tools.connection.credentialPicker.create') }}</span>
@@ -185,7 +249,7 @@ function editCredential(credentialId: string) {
 		:variant="connectVariant"
 		size="small"
 		data-test-id="tool-credential-picker-trigger-connect"
-		@click="createCredential"
+		@click="createCredential(creatableCredentials[0]?.authType ?? '', 'direct')"
 	>
 		<span>{{ i18n.baseText('tools.connection.action.connect') }}</span>
 	</N8nButton>
@@ -196,25 +260,34 @@ function editCredential(credentialId: string) {
 	margin-left: var(--spacing--4xs);
 }
 
-.connectedPill {
+.statusMarker,
+.statusPill {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--spacing--3xs);
+	padding: var(--spacing--4xs) var(--spacing--3xs);
 	color: var(--color--text--tint-1);
 	font-size: var(--font-size--2xs);
-	background: none;
-	border: 0;
-	padding: var(--spacing--4xs) var(--spacing--3xs);
-	cursor: pointer;
 	white-space: nowrap;
 }
 
-.statusDot {
-	width: 8px;
-	height: 8px;
-	border-radius: 50%;
-	background: var(--color--success);
+.statusPill {
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+
+.statusIconConnected,
+.statusIconDisconnected {
 	flex-shrink: 0;
+}
+
+.statusIconConnected {
+	color: var(--color--success);
+}
+
+.statusIconDisconnected {
+	color: var(--color--danger);
 }
 
 .searchWrapper {
@@ -245,7 +318,7 @@ function editCredential(credentialId: string) {
 	transition: background-color 80ms ease;
 
 	&:hover {
-		background: var(--color--background--light-2);
+		background: var(--color--background--light-1);
 
 		.rowEdit {
 			opacity: 1;
@@ -256,9 +329,16 @@ function editCredential(credentialId: string) {
 }
 
 .rowLabel {
+	display: flex;
+	flex-direction: column;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.authLabel {
+	color: var(--color--text--tint-1);
+	font-size: var(--font-size--3xs);
 }
 
 .rowActions {
@@ -312,7 +392,7 @@ function editCredential(credentialId: string) {
 	text-align: left;
 
 	&:hover {
-		background: var(--color--background--light-2);
+		background: var(--color--background--light-1);
 	}
 }
 </style>

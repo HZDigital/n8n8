@@ -9,7 +9,8 @@ import { ensureHostsBypassProxy } from '@n8n/backend-network/proxy';
 import { ExecutionsConfig } from '@n8n/config';
 import type { User } from '@n8n/db';
 import { Service } from '@n8n/di';
-import type { WorkflowJSON } from '@n8n/workflow-sdk';
+import { sleep } from '@n8n/utils/sleep';
+import type { DataTableColumnInfo, WorkflowJSON } from '@n8n/workflow-sdk';
 import { normalizePinData } from '@n8n/workflow-sdk';
 import {
 	BinaryDataService,
@@ -34,14 +35,18 @@ import {
 	createRunExecutionData,
 	fileTypeFromMimeType,
 	NodeHelpers,
+	TimeoutExecutionCancelledError,
 	UserError,
 	Workflow,
 } from 'n8n-workflow';
 import { randomUUID } from 'node:crypto';
 
 import { ActiveExecutions } from '@/active-executions';
+import { LoadNodesAndCredentials } from '@/load-nodes-and-credentials';
+import { DataTableService } from '@/modules/data-table/data-table.service';
 import { NodeTypes } from '@/node-types';
 import { PostHogClient } from '@/posthog';
+import { OwnershipService } from '@/services/ownership.service';
 import { WorkflowRunner } from '@/workflow-runner';
 import { WorkflowFinderService } from '@/workflows/workflow-finder.service';
 import { WorkflowStaticDataService } from '@/workflows/workflow-static-data.service';
@@ -49,12 +54,19 @@ import { WorkflowStaticDataService } from '@/workflows/workflow-static-data.serv
 import { createLlmCompletionMockHandler } from './llm-completion-mock';
 import { EvalMockedCredentialsHelper } from './eval-mocked-credentials-helper';
 import { EvalTimings } from './eval-timings';
+import { snapshotLedgerBody } from './ledger-snapshot';
 import { type InterceptedTurn, LlmWireServer } from './llm-wire-server';
 import { createLlmMockHandler } from './mock-handler';
+import {
+	extractResponsesRequestModel,
+	isOpenAiResponsesUrl,
+	normalizeOpenAiResponsesMockResponse,
+} from './openai-responses-envelope';
 import { generatePinData } from './pin-data-generator';
 import {
 	buildVendorLlmRouting,
 	detectBinaryDependencies,
+	emitsDataTableRows,
 	generateMockHints,
 	identifyNodesForHints,
 	identifyNodesForPinData,
@@ -70,6 +82,13 @@ import {
 
 /** Max output items per branch kept in the artifact. The full count lives in `outputCount`. */
 const MAX_OUTPUT_ITEMS_PER_BRANCH = 10;
+
+/** A caller's run budget as a wall-clock deadline; setup counts against it, so
+ *  the run gets what is left. `totalMs` is kept for the message. */
+interface RunBudget {
+	totalMs: number;
+	deadlineAt: number;
+}
 
 // ---------------------------------------------------------------------------
 // Service
@@ -90,6 +109,9 @@ export class EvalExecutionService {
 		private readonly executionsConfig: ExecutionsConfig,
 		private readonly binaryDataService: BinaryDataService,
 		private readonly workflowStaticDataService: WorkflowStaticDataService,
+		private readonly loadNodesAndCredentials: LoadNodesAndCredentials,
+		private readonly ownershipService: OwnershipService,
+		private readonly dataTableService: DataTableService,
 	) {}
 
 	async executeWithLlmMock(
@@ -97,6 +119,13 @@ export class EvalExecutionService {
 		user: User,
 		options: InstanceAiEvalExecutionRequest = {},
 	): Promise<InstanceAiEvalExecutionResult> {
+		// Anchored at receipt, before any setup: setup is LLM calls, so a budget
+		// anchored later would expire after the caller's own deadline.
+		const budget: RunBudget | undefined =
+			options.timeoutMs === undefined
+				? undefined
+				: { totalMs: options.timeoutMs, deadlineAt: Date.now() + options.timeoutMs };
+
 		// Eval routes through WorkflowRunner with a configureAdditionalData closure
 		// that doesn't survive queue serialization. Refuse upfront so vendor calls
 		// can never leak to real providers from a worker that never wires the mock.
@@ -113,7 +142,7 @@ export class EvalExecutionService {
 		]);
 		if (!workflowEntity) {
 			for (const delayMs of [200, 500, 1000]) {
-				await new Promise((resolve) => setTimeout(resolve, delayMs));
+				await sleep(delayMs);
 				workflowEntity = await this.workflowFinderService.findWorkflowForUser(workflowId, user, [
 					'workflow:execute',
 				]);
@@ -183,6 +212,7 @@ export class EvalExecutionService {
 			options.scenarioHints,
 			interceptionEnabled,
 			vendorLlmRouting,
+			budget,
 		);
 	}
 
@@ -276,6 +306,8 @@ export class EvalExecutionService {
 		if (bypassNodeNames.length === 0) return {};
 
 		try {
+			const dataTableColumns = await this.resolveDataTableColumns(workflowEntity, bypassNodeNames);
+
 			// Keep the scenario separate from the general context: the pin generator
 			// treats "Test Scenario" as authoritative, and merging them into one blob
 			// lets invented context override scenario-specified stored state.
@@ -290,24 +322,25 @@ export class EvalExecutionService {
 							globalContext || scenarioHints
 								? { dataDescription: globalContext, testScenario: scenarioHints }
 								: undefined,
+						outputSchemaLookup: this.loadNodesAndCredentials.createOutputSchemaLookup(),
+						dataTableColumns,
 					}),
 			);
 
 			const normalized = normalizePinData(result as unknown as IPinData);
 
-			// generatePinData swallows internal failures (LLM timeout, parse error)
-			// and returns {} or a partial map instead of throwing, so the catch
-			// fallback below never fires for those. An unpinned bypass node
-			// EXECUTES for real — for AI roots the vendor SDK then makes real
-			// network calls (observed in CI: un-mocked Anthropic request →
-			// "Authorization failed"). Guarantee every bypass node is pinned,
-			// even if only with an empty item.
+			// A MISSING bypass entry would let the node execute for real — for AI
+			// roots the vendor SDK then makes real network calls (observed in CI:
+			// un-mocked Anthropic request → "Authorization failed"). An EMPTY array
+			// is different: the execution engine honors it as "pinned, zero items"
+			// (presence check, not length), and zero-item scenario premises depend
+			// on it — never replace [] with a phantom item (TRUST-343).
 			for (const nodeName of bypassNodeNames) {
-				if (!normalized[nodeName] || normalized[nodeName].length === 0) {
+				if (!normalized[nodeName]) {
 					this.logger.warn(
-						`[EvalMock] Phase 1.5 produced no pin data for bypass node "${nodeName}" — pinning an empty item to prevent real execution`,
+						`[EvalMock] Phase 1.5 produced no pin data for bypass node "${nodeName}" — pinning empty to prevent real execution`,
 					);
-					normalized[nodeName] = [{ json: {} }];
+					normalized[nodeName] = [];
 				}
 			}
 
@@ -317,6 +350,73 @@ export class EvalExecutionService {
 			this.logger.error(`[EvalMock] Phase 1.5 pin data generation failed: ${errorMsg}`);
 			throw new Error(`FRAMEWORK ISSUE: Phase 1.5 pin data generation failed: ${errorMsg}`);
 		}
+	}
+
+	/**
+	 * Real column names for each pinned dataTable-read node, read from the
+	 * builder-created table itself. They are the authoritative row shape —
+	 * without them the pin generator invents plausible-but-wrong column names
+	 * (`email` where the table says `contact_email`) and correctly-built
+	 * downstream expressions resolve undefined. Best-effort: a missing table or
+	 * unresolved id degrades that node to prompt-only generation.
+	 *
+	 * Only row-emitting reads qualify — `rowExists`/`rowNotExists` pass the input
+	 * item through, so enforcing table columns on them would demand a fixture the
+	 * real node never emits.
+	 */
+	private async resolveDataTableColumns(
+		workflowEntity: IWorkflowBase,
+		bypassNodeNames: string[],
+	): Promise<Record<string, DataTableColumnInfo[]> | undefined> {
+		const bypassSet = new Set(bypassNodeNames);
+		const readNodes = workflowEntity.nodes.filter(
+			(node) => bypassSet.has(node.name) && emitsDataTableRows(node),
+		);
+		if (readNodes.length === 0) return undefined;
+
+		const columnsByNode: Record<string, DataTableColumnInfo[]> = {};
+		let projectId: string | undefined;
+		for (const node of readNodes) {
+			try {
+				const locator = node.parameters?.dataTableId as
+					| { mode?: unknown; value?: unknown }
+					| string
+					| undefined;
+				const locatorValue = typeof locator === 'string' ? locator : locator?.value;
+				if (typeof locatorValue !== 'string' || locatorValue.length === 0) continue;
+
+				projectId ??= (await this.ownershipService.getWorkflowProjectCached(workflowEntity.id)).id;
+
+				// `name` mode carries a table name, not an id (the node runtime resolves
+				// it via `resolveDataTableId`) — passing it straight to an id lookup
+				// dropped named tables to prompt-only generation. Exact name match only;
+				// a near-miss still degrades gracefully below.
+				let tableId = locatorValue;
+				if ((typeof locator === 'string' ? 'id' : locator?.mode) === 'name') {
+					const matches = await this.dataTableService.findDataTablesByNamesInProject(projectId, [
+						locatorValue,
+					]);
+					const resolved = matches.at(0)?.id;
+					if (!resolved) {
+						this.logger.warn(
+							`[EvalMock] No Data Table named "${locatorValue}" for node "${node.name}" — pinned rows fall back to prompt-only generation`,
+						);
+						continue;
+					}
+					tableId = resolved;
+				}
+
+				const columns = await this.dataTableService.getColumns(tableId, projectId);
+				columnsByNode[node.name] = columns.map(({ name, type }) => ({ name, type }));
+			} catch (error) {
+				this.logger.warn(
+					`[EvalMock] Could not resolve Data Table columns for node "${node.name}" — pinned rows fall back to prompt-only generation`,
+					{ error: error instanceof Error ? error.message : String(error) },
+				);
+			}
+		}
+
+		return Object.keys(columnsByNode).length > 0 ? columnsByNode : undefined;
 	}
 
 	// ── Phase 2: Mock execution ────────────────────────────────────────────
@@ -329,8 +429,15 @@ export class EvalExecutionService {
 		scenarioHints?: string,
 		interceptionEnabled = false,
 		vendorLlmRouting?: VendorLlmRouting,
+		/** Caller's budget; unbounded when omitted. See awaitRunWithinBudget. */
+		budget?: RunBudget,
 	): Promise<InstanceAiEvalExecutionResult> {
-		const nodeResults: Record<string, InstanceAiEvalNodeResult> = {};
+		// Null-prototype map: node names are the keys here and come from workflow
+		// input, so a reserved name (`__proto__`, `constructor`, ...) must land as an
+		// own key instead of resolving up the prototype chain. Without this, the
+		// `nodeResults[name] ??= {}` + nested-write sinks below would assign onto
+		// `Object.prototype`.
+		const nodeResults: Record<string, InstanceAiEvalNodeResult> = Object.create(null);
 
 		// Fill setup-pending resource locators BEFORE the first normalization pass:
 		// Workflow construction runs getNodeParameters(returnNoneDisplayed=false),
@@ -343,6 +450,20 @@ export class EvalExecutionService {
 		for (const node of workflowEntity.nodes) {
 			if (node.disabled || !node.parameters) continue;
 			fillSetupPendingResourceLocators(node.parameters);
+		}
+
+		// Time-based Wait nodes park the execution until a future timestamp
+		// (specificTime) or sleep away the scenario budget (timeInterval), so
+		// downstream nodes never run inside the eval window even when the built
+		// workflow is correct. Zero them — execution order and branch structure
+		// stay observable, and the verifier still sees the builder's original
+		// wait config in the workflow JSON. Webhook/form-resume waits are left
+		// untouched (they model an external event, not the passage of time).
+		for (const node of workflowEntity.nodes) {
+			if (node.disabled || node.type !== 'n8n-nodes-base.wait') continue;
+			const resume = node.parameters?.resume;
+			if (resume === 'webhook' || resume === 'form') continue;
+			node.parameters = { ...node.parameters, resume: 'timeInterval', amount: 0, unit: 'seconds' };
 		}
 
 		const workflow = this.buildWorkflow(workflowEntity);
@@ -369,6 +490,7 @@ export class EvalExecutionService {
 			startNode,
 			hints.triggerContent,
 			binaryRequirement,
+			hints.triggerEmitsNoItems,
 		);
 		const pinData: IPinData = { ...triggerPinData, ...hints.bypassPinData };
 		const pinDataNodeNames = Object.keys(pinData);
@@ -447,7 +569,7 @@ export class EvalExecutionService {
 			};
 
 			dbExecutionId = await this.workflowRunner.run(runData);
-			const runResult = await this.activeExecutions.getPostExecutePromise(dbExecutionId);
+			const runResult = await this.awaitRunWithinBudget(dbExecutionId, budget);
 
 			if (!runResult) {
 				return this.buildPartialFailureResult(
@@ -640,7 +762,12 @@ export class EvalExecutionService {
 		startNode: INode,
 		triggerContent: Record<string, unknown>,
 		binaryRequirement?: TriggerBinaryRequirement,
+		triggerEmitsNoItems = false,
 	): IPinData {
+		// A pinned empty array is "this node emitted nothing": downstream nodes stay idle,
+		// which is the point of a "no new items" scenario. No pin at all would instead
+		// start the trigger with one injected empty item.
+		if (triggerEmitsNoItems) return { [startNode.name]: [] };
 		if (Object.keys(triggerContent).length === 0 && !binaryRequirement) return {};
 
 		// Mirror any LLM-embedded binary map as real item-level binary; json stays
@@ -758,11 +885,29 @@ export class EvalExecutionService {
 				executionMode: 'mocked',
 			});
 			entry.executionMode = 'mocked';
-			const response = await timings.time(
+			let response = await timings.time(
 				'http-mock',
 				node.name,
 				async () => await mockHandler(requestOptions, node),
 			);
+
+			// Responses-API calls from the openAi node bypass the wire-server
+			// protocol adapters — coerce the generated body to the canonical
+			// envelope so the node's real parser accepts it.
+			if (response && response.statusCode < 400 && isOpenAiResponsesUrl(requestOptions.url)) {
+				const normalized = normalizeOpenAiResponsesMockResponse(
+					response,
+					extractResponsesRequestModel(requestOptions.body),
+				);
+				if (normalized !== response) {
+					// Triage breadcrumb: the recorded mockResponse below is the coerced
+					// body, not the generator's raw output.
+					this.logger.debug(
+						`[EvalMock] Applied Responses-envelope normalization for "${node.name}"`,
+					);
+				}
+				response = normalized;
+			}
 
 			entry.interceptedRequests.push({
 				// Broken routing (resource/operation missing on the node type) emits a
@@ -772,7 +917,7 @@ export class EvalExecutionService {
 				method: requestOptions.method ?? 'GET',
 				nodeType: node.type,
 				requestBody: requestOptions.body,
-				mockResponse: response?.body,
+				mockResponse: snapshotLedgerBody(response?.body),
 			});
 
 			this.logger.debug(
@@ -806,6 +951,60 @@ export class EvalExecutionService {
 	}
 
 	/**
+	 * Await the execution, stopping it once the budget elapses. Eval mode skips
+	 * concurrency reservation (see `ActiveExecutions.add`), so nothing else would,
+	 * and an abandoned run keeps burning CPU on a shared instance. Omit to wait.
+	 */
+	private async awaitRunWithinBudget(
+		executionId: string,
+		budget: RunBudget | undefined,
+	): Promise<IRun | undefined> {
+		const postExecute = this.activeExecutions.getPostExecutePromise(executionId);
+		if (!budget) return await postExecute;
+
+		// Race loser: our timer's cancellation must not surface as unhandled.
+		postExecute.catch(() => {});
+
+		// Clamped: setup may have eaten the budget, which stops the run at once.
+		const remainingMs = Math.max(budget.deadlineAt - Date.now(), 0);
+		const seconds = Math.round(budget.totalMs / 1000);
+		const budgetError = () =>
+			new Error(`Execution exceeded its ${seconds}s eval budget and was stopped`);
+
+		// `stopExecution` rejects the promise being raced, so report off this flag
+		// rather than whichever arm won — else a budget stop reads as any other
+		// cancellation.
+		let stoppedForBudget = false;
+
+		let deadline: NodeJS.Timeout | undefined;
+		try {
+			return await Promise.race([
+				postExecute,
+				new Promise<never>((_resolve, reject) => {
+					deadline = setTimeout(() => {
+						stoppedForBudget = true;
+						this.logger.warn(
+							`[EvalMock] Execution ${executionId} exceeded its ${seconds}s budget — stopping it`,
+						);
+						// No try/catch: `stopExecution` returns early for an unknown id
+						// rather than throwing, so an execution that finished between the
+						// timer firing and this call needs no handling here.
+						this.activeExecutions.stopExecution(
+							executionId,
+							new TimeoutExecutionCancelledError(executionId),
+						);
+						reject(budgetError());
+					}, remainingMs);
+				}),
+			]);
+		} catch (error) {
+			throw stoppedForBudget ? budgetError() : error;
+		} finally {
+			if (deadline) clearTimeout(deadline);
+		}
+	}
+
+	/**
 	 * Build the failure result returned when execution threw partway through —
 	 * preserves the accumulated `nodeResults`, `hints`, and credential
 	 * diagnostics rather than discarding them like `errorResult` does. Lifted
@@ -826,7 +1025,7 @@ export class EvalExecutionService {
 			success: false,
 			nodeResults,
 			errors: [`Execution failed: ${message}`],
-			hints,
+			hints: withInterceptionGaps(hints, credentialsHelper),
 			mockedCredentials: credentialsHelper?.mockedCredentials ?? [],
 			rewrittenCredentials: credentialsHelper?.rewrittenCredentials ?? [],
 		};
@@ -936,7 +1135,7 @@ export class EvalExecutionService {
 			success: allErrors.length === 0,
 			nodeResults,
 			errors: allErrors,
-			hints,
+			hints: withInterceptionGaps(hints, credentialsHelper),
 			mockedCredentials: credentialsHelper?.mockedCredentials ?? [],
 			rewrittenCredentials: credentialsHelper?.rewrittenCredentials ?? [],
 		};
@@ -959,6 +1158,16 @@ export class EvalExecutionService {
 			rewrittenCredentials: [],
 		};
 	}
+}
+
+/** `warnings` is the channel the verification artifact renders as FRAMEWORK ISSUE flags. */
+function withInterceptionGaps(
+	hints: MockHints,
+	credentialsHelper: EvalMockedCredentialsHelper | undefined,
+): MockHints {
+	const gaps = credentialsHelper?.interceptionGaps ?? [];
+	if (gaps.length === 0) return hints;
+	return { ...hints, warnings: [...hints.warnings, ...gaps] };
 }
 
 /** Synthesize a structurally valid binary entry (real bytes, base64-inlined). */
@@ -1030,6 +1239,8 @@ function synthesizePlaceholderValue(hint: string): string {
 	if (h.includes('slack channel') || h.includes('channel')) return 'C00000000EVAL';
 	if (h.includes('chat') && h.includes('id')) return '100000000';
 	if (h.includes('telegram')) return '100000000';
+	// Page, account and object ids: the node validates the shape, so a word is rejected.
+	if (/\bid\b/.test(h) || h.includes('account')) return '100000000';
 	const selectedResourceValue = synthesizeSelectedResourcePlaceholderValue(h);
 	if (selectedResourceValue) return selectedResourceValue;
 	return '__evalMockValue';
@@ -1100,7 +1311,7 @@ function fillSetupPendingResourceLocators(parameters: INodeParameters): void {
 		parameters[key] = {
 			...rl,
 			value: synthesizeResourceLocatorValue(key),
-		} as INodeParameters[string];
+		};
 	}
 }
 
@@ -1150,7 +1361,7 @@ function patchSetupPendingResourceMappers(parameters: INodeParameters): string[]
 		const value = mapper.value;
 		const mappingKeys =
 			value !== null && typeof value === 'object' && !Array.isArray(value)
-				? Object.keys(value as Record<string, unknown>)
+				? Object.keys(value)
 				: [];
 
 		if (mappingKeys.length === 0) {
@@ -1162,7 +1373,7 @@ function patchSetupPendingResourceMappers(parameters: INodeParameters): string[]
 				mappingMode: 'autoMapInputData',
 				value: null,
 				schema: Array.isArray(mapper.schema) ? mapper.schema : [],
-			} as INodeParameters[string];
+			};
 			changes.push(`${key}: defineBelow without mappings → autoMapInputData`);
 			continue;
 		}
@@ -1182,7 +1393,7 @@ function patchSetupPendingResourceMappers(parameters: INodeParameters): string[]
 				type: 'string',
 				canBeUsedToMatch: true,
 			})),
-		} as INodeParameters[string];
+		};
 	}
 	return changes;
 }

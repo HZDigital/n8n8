@@ -26,8 +26,8 @@ dbConnection.init.mockResolvedValue(undefined);
 dbConnection.migrate.mockResolvedValue(undefined);
 
 const deploymentKeyRepository = mockInstance(DeploymentKeyRepository);
-deploymentKeyRepository.findActiveByType.mockResolvedValue(null);
-deploymentKeyRepository.insertOrIgnore.mockResolvedValue(undefined);
+deploymentKeyRepository.findActiveIdentifier.mockResolvedValue(null);
+deploymentKeyRepository.seedActiveIdentifier.mockResolvedValue(undefined);
 
 mockInstance(RedisClientService);
 mockInstance(PubSubRegistry);
@@ -71,7 +71,7 @@ describe('Webhook', () => {
 
 	describe('run', () => {
 		beforeEach(async () => {
-			const { ScalingService } = await import('@/scaling/scaling.service');
+			const { ScalingService } = await import('@/scaling/scaling.service.js');
 			Container.set(ScalingService, { setupQueue: vi.fn() } as unknown as InstanceType<
 				typeof ScalingService
 			>);
@@ -141,4 +141,8 @@ describe('Webhook', () => {
 			);
 		});
 	});
+});
+
+test('webhook needs the expression engine', () => {
+	expect(new Webhook().needsExpressionEngine).toBe(true);
 });

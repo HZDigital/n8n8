@@ -1,6 +1,7 @@
 import { makeRestApiRequest } from '@n8n/rest-api-client';
 import type { IRestApiContext } from '@n8n/rest-api-client';
 import type {
+	ComputerUseChannel,
 	InstanceAiAttachment,
 	InstanceAiBrowserCreateLinkResponse,
 	InstanceAiBrowserStatusResponse,
@@ -8,8 +9,18 @@ import type {
 	InstanceAiSendMessageResponse,
 	InstanceAiConfirmRequest,
 	InstanceAiConfirmResponse,
+	InstanceAiCredits,
 	InstanceAiHandoffContext,
+	InstanceAiThreadOrigin,
+	InstanceAiThreadSource,
+	InstanceAiThreadArtifactsContext,
 } from '@n8n/api-types';
+
+export interface InstanceAiThreadLaunchInput {
+	source: InstanceAiThreadSource;
+	origin?: InstanceAiThreadOrigin;
+	sourceContext?: Record<string, unknown>;
+}
 
 /**
  * POST /instance-ai/chat/:threadId -> { runId }
@@ -23,6 +34,8 @@ export async function postMessage(
 	handoffContext?: InstanceAiHandoffContext,
 	timeZone?: string,
 	pushRef?: string,
+	computerUseChannels?: ComputerUseChannel[],
+	threadArtifacts?: InstanceAiThreadArtifactsContext,
 ): Promise<InstanceAiSendMessageResponse> {
 	return await makeRestApiRequest<InstanceAiSendMessageResponse>(
 		context,
@@ -34,6 +47,8 @@ export async function postMessage(
 			...(handoffContext ? { context: handoffContext } : {}),
 			...(timeZone ? { timeZone } : {}),
 			...(pushRef ? { pushRef } : {}),
+			...(computerUseChannels ? { computerUseChannels } : {}),
+			...(threadArtifacts ? { threadArtifacts } : {}),
 		},
 	);
 }
@@ -42,12 +57,13 @@ export async function ensureThread(
 	context: IRestApiContext,
 	threadId: string,
 	projectId: string,
+	launch: InstanceAiThreadLaunchInput,
 ): Promise<InstanceAiEnsureThreadResponse> {
 	return await makeRestApiRequest<InstanceAiEnsureThreadResponse>(
 		context,
 		'POST',
 		'/instance-ai/threads',
-		{ threadId, projectId },
+		{ threadId, projectId, ...launch },
 	);
 }
 
@@ -109,17 +125,12 @@ export async function postConfirmation(
 }
 
 /**
- * GET /instance-ai/credits -> { creditsQuota, creditsClaimed }
- * Returns -1 quota when proxy is disabled.
+ * GET /instance-ai/credits -> { creditsQuota, creditsClaimed, quotaLocked }
+ * Returns -1 quota when the proxy is disabled, and also for the activation-capped trial cohort,
+ * whose balance is never shown — for them `quotaLocked` is the only usage signal.
  */
-export async function getInstanceAiCredits(
-	context: IRestApiContext,
-): Promise<{ creditsQuota: number; creditsClaimed: number }> {
-	return await makeRestApiRequest<{ creditsQuota: number; creditsClaimed: number }>(
-		context,
-		'GET',
-		'/instance-ai/credits',
-	);
+export async function getInstanceAiCredits(context: IRestApiContext): Promise<InstanceAiCredits> {
+	return await makeRestApiRequest<InstanceAiCredits>(context, 'GET', '/instance-ai/credits');
 }
 
 /**

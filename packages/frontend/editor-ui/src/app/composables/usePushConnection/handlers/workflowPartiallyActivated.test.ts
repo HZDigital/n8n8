@@ -17,6 +17,7 @@ const {
 	mockToast,
 	mockI18n,
 	mockSettingsStore,
+	mockClearPendingActivationModal,
 } = vi.hoisted(() => ({
 	mockWorkflowsListStore: {
 		fetchWorkflow: vi.fn(),
@@ -39,6 +40,11 @@ const {
 	mockSettingsStore: {
 		isWorkflowPublicationServiceEnabled: true,
 	},
+	mockClearPendingActivationModal: vi.fn(),
+}));
+
+vi.mock('@/app/composables/workflowPublicationConfirmation', () => ({
+	clearPendingActivationModal: mockClearPendingActivationModal,
 }));
 
 vi.mock('@/app/stores/workflowsList.store', () => ({
@@ -57,7 +63,7 @@ vi.mock('@/app/stores/ui.store', () => ({
 	useUIStore: () => mockUIStore,
 }));
 
-vi.mock('@/app/composables/useToast', () => ({
+vi.mock('@n8n/composables/useToast', () => ({
 	useToast: () => mockToast,
 }));
 
@@ -65,7 +71,7 @@ vi.mock('@n8n/i18n', () => ({
 	useI18n: () => mockI18n,
 }));
 
-vi.mock('@/app/stores/settings.store', () => ({
+vi.mock('@n8n/stores/settings.store', () => ({
 	useSettingsStore: () => mockSettingsStore,
 }));
 
@@ -111,6 +117,22 @@ describe('workflowPartiallyActivated', () => {
 			{ nodeId: 'node-1', nodeName: 'Webhook', errorMessage: 'Path conflict' },
 			{ nodeId: 'node-2', nodeName: 'Schedule', errorMessage: 'Registration failed' },
 		]);
+	});
+
+	// ADO-4969: a partial publication gets its own warning toast; the success
+	// modal deferred by the publish flow must never show next to it.
+	it('clears a pending activation success modal intent', async () => {
+		mockWorkflowsListStore.fetchWorkflow.mockResolvedValue({ id: 'wf-123', checksum: 'abc' });
+
+		await workflowPartiallyActivated(makeEvent(), options);
+
+		expect(mockClearPendingActivationModal).toHaveBeenCalledWith('wf-123');
+	});
+
+	it('clears the pending intent even when viewing another workflow', async () => {
+		await workflowPartiallyActivated(makeEvent({ workflowId: 'wf-other' }), options);
+
+		expect(mockClearPendingActivationModal).toHaveBeenCalledWith('wf-other');
 	});
 
 	it('does NOT set publicationStatus when flag is off', async () => {
@@ -167,5 +189,33 @@ describe('workflowPartiallyActivated', () => {
 		expect(workflowDocumentStore.publicationStatus).toBe('idle');
 		expect(workflowDocumentStore.publicationFailures).toEqual([]);
 		expect(mockToast.showError).not.toHaveBeenCalled();
+	});
+
+	// Regression: INS-859 — same latent defect as workflowActivated. `activeVersionId` is part
+	// of the conflict checksum (WORKFLOW_CHECKSUM_FIELDS in packages/workflow), so a partial
+	// activation also changes the server-side checksum. An editor with unsaved changes must
+	// refresh its stored `expectedChecksum` instead of being left holding the pre-publish value,
+	// which would 409 the next autosave with "Workflow was changed by someone else".
+	it('refreshes the editor checksum on partial activation even when there are unsaved changes', async () => {
+		// Editor opened before publication: draft checksum captured, workflow not yet published.
+		workflowDocumentStore.setActiveState({ activeVersionId: null, activeVersion: null });
+		workflowDocumentStore.setChecksum('checksum-before-publish');
+
+		// User dragged a node → workspace is dirty, autosave pending.
+		mockUIStore.stateIsDirty = true;
+
+		// Publication lands with a partial result: server checksum now reflects the new
+		// activeVersionId.
+		mockWorkflowsListStore.fetchWorkflow.mockResolvedValue({
+			id: 'wf-123',
+			activeVersionId: 'v2',
+			checksum: 'checksum-after-publish',
+		});
+
+		await workflowPartiallyActivated(makeEvent(), options);
+
+		expect(workflowDocumentStore.checksum).toBe('checksum-after-publish');
+		// The in-progress edits must survive: reconcile the checksum, never re-hydrate.
+		expect(mockCanvasOperations.initializeWorkspace).not.toHaveBeenCalled();
 	});
 });

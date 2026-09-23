@@ -9,10 +9,11 @@ import type { IUser } from '@n8n/rest-api-client/api/users';
 import { useFoldersStore } from '@/features/core/folders/folders.store';
 import { useCredentialsStore } from '@/features/credentials/credentials.store';
 import { useProjectsStore } from '@/features/collaboration/projects/projects.store';
-import { useSettingsStore } from '@/app/stores/settings.store';
+import { useSettingsStore } from '@n8n/stores/settings.store';
 import { useSourceControlStore } from '@/features/integrations/sourceControl.ee/sourceControl.store';
+import { promotionEventBus } from '@/features/integrations/promotions.ee/promotions.eventBus';
 import { useTagsStore } from '@/features/shared/tags/tags.store';
-import { useUsersStore } from '@/features/settings/users/users.store';
+import { useUsersStore } from '@n8n/stores/users.store';
 import { useWorkflowsListStore } from '@/app/stores/workflowsList.store';
 import type { Project } from '@/features/collaboration/projects/projects.types';
 import WorkflowsView from '@/app/views/WorkflowsView.vue';
@@ -46,15 +47,16 @@ vi.mock('@/experiments/utils', async (importOriginal) => {
 	};
 });
 const mockTrack = vi.fn();
-vi.mock('@/app/composables/useTelemetry', () => ({
+vi.mock('@n8n/composables/useTelemetry', () => ({
 	useTelemetry: vi.fn(() => ({
 		track: mockTrack,
 	})),
 }));
 
 const mockShowError = vi.fn();
-vi.mock('@/app/composables/useToast', () => ({
-	useToast: () => ({ showError: mockShowError }),
+const mockShowMessage = vi.fn();
+vi.mock('@n8n/composables/useToast', () => ({
+	useToast: () => ({ showError: mockShowError, showMessage: mockShowMessage }),
 }));
 
 const router = createRouter({
@@ -464,6 +466,20 @@ describe('WorkflowsView', () => {
 			await waitAllPromises();
 
 			await sourceControl.pullWorkfolder(true, 'none');
+		});
+	});
+
+	describe('promotions', () => {
+		it('should reload the list after a package was applied', async () => {
+			renderComponent({ pinia });
+			await waitAllPromises();
+			const fetches = workflowsListStore.fetchWorkflowsPage.mock.calls.length;
+
+			promotionEventBus.emit('applied', { projectId: 'project-1' });
+
+			await waitFor(() =>
+				expect(workflowsListStore.fetchWorkflowsPage.mock.calls.length).toBeGreaterThan(fetches),
+			);
 		});
 	});
 });

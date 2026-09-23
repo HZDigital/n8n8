@@ -45,7 +45,7 @@ export class AzureAdService {
 	private pkceStore: Map<string, PkceStoreEntry> = new Map();
 
 	constructor(
-		private readonly globalConfig: GlobalConfig,
+		globalConfig: GlobalConfig,
 		private readonly logger: Logger,
 		private readonly userRepository: UserRepository,
 		private readonly authIdentityRepository: AuthIdentityRepository,

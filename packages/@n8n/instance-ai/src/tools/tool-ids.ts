@@ -1,6 +1,7 @@
+import { isAgentFeatureEnabled } from '../utils/agent-feature-enabled';
+
 export const DOMAIN_TOOL_IDS = {
 	WORKFLOWS: 'workflows',
-	EVALS: 'evals',
 	EVAL_CONFIG: 'eval-config',
 	EXECUTIONS: 'executions',
 	CREDENTIALS: 'credentials',
@@ -9,9 +10,14 @@ export const DOMAIN_TOOL_IDS = {
 	RESEARCH: 'research',
 	N8N_DOCS: 'n8n-docs',
 	NODES: 'nodes',
+	SEARCH_MODELS: 'searchModels',
 	ASK_USER: 'ask-user',
 	BUILD_WORKFLOW: 'build-workflow',
 	PARSE_FILE: 'parse-file',
+	AGENTS: 'agents',
+	MCP_SERVERS: 'mcp-servers',
+	CONVERSATION_HISTORY: 'conversation-history',
+	ACTIVITY: 'activity',
 } as const;
 
 /** Trace-only chain-typed child run emitted by `build-workflow` with the
@@ -20,54 +26,25 @@ export const DOMAIN_TOOL_IDS = {
  *  SDK re-parse; excluded by name from rebuilt transcripts. */
 export const COMPILED_WORKFLOW_TRACE_RUN_NAME = 'compiled-workflow';
 
+/** Trace-only chain run carrying an agent's config + skills, for seed
+ *  reconstruction — the agent counterpart of the event above. */
+export const AGENT_SNAPSHOT_TRACE_RUN_NAME = 'agent-snapshot';
+
 export const ORCHESTRATION_TOOL_IDS = {
 	CREATE_TASKS: 'create-tasks',
 	TASK_CONTROL: 'task-control',
-	EVAL_SETUP_WITH_AGENT: 'eval-setup-with-agent',
-	EVAL_DATA: 'eval-data',
 	COMPLETE_CHECKPOINT: 'complete-checkpoint',
 	VERIFY_BUILT_WORKFLOW: 'verify-built-workflow',
 	REPORT_VERIFICATION_VERDICT: 'report-verification-verdict',
 	APPLY_WORKFLOW_CREDENTIALS: 'apply-workflow-credentials',
+	BUILD_AGENT: 'build-agent',
+	LIST_AGENT_CAPABILITIES: 'list-agent-capabilities',
+	GET_SESSION: 'get-session',
 } as const;
 
 export const WORKSPACE_TOOL_IDS = {
 	WRITE_FILE: 'write-file',
 } as const;
-
-/**
- * Agent-builder tools. Names match the agent builder in
- * `packages/cli/src/modules/agents/builder` so the moved agent-builder skills
- * reference them unchanged. Registered as deferred and loaded on demand by the
- * agent-builder skill — never always-loaded.
- */
-export const AGENT_BUILDER_TOOL_IDS = {
-	/** The single router tool wrapping all non-interactive agent-builder actions. */
-	AGENT_BUILDER: 'agent_builder',
-	CREATE_AGENT: 'create_agent',
-	READ_CONFIG: 'read_config',
-	BUILD_AGENT: 'build_agent',
-	GET_RESOURCE_LOCATOR_OPTIONS: 'get_resource_locator_options',
-	SEARCH_NODES: 'search_nodes',
-	GET_NODE_TYPES: 'get_node_types',
-	RESOLVE_LLM: 'resolve_llm',
-	CREATE_SKILL: 'create_skill',
-	CREATE_TASK: 'create_task',
-	BUILD_CUSTOM_TOOL: 'build_custom_tool',
-	LIST_INTEGRATION_TYPES: 'list_integration_types',
-	/** Interactive HITL tool: opens the chat-channel setup UI (standalone, not a router action). */
-	CONFIGURE_CHANNEL: 'configure_channel',
-	LIST_SUB_AGENTS: 'list_sub_agents',
-	LIST_AGENTS: 'list_agents',
-	LIST_WORKFLOWS: 'list_workflows',
-	SEARCH_MCP_SERVERS: 'search_mcp_servers',
-	VERIFY_MCP_SERVER: 'verify_mcp_server',
-} as const;
-
-export type AgentBuilderToolName =
-	(typeof AGENT_BUILDER_TOOL_IDS)[keyof typeof AGENT_BUILDER_TOOL_IDS];
-
-export const AGENT_BUILDER_TOOL_NAMES = new Set<string>(Object.values(AGENT_BUILDER_TOOL_IDS));
 
 export const CREDENTIALS_TOOL_ID = DOMAIN_TOOL_IDS.CREDENTIALS;
 export const DATA_TABLES_TOOL_ID = DOMAIN_TOOL_IDS.DATA_TABLES;
@@ -88,8 +65,33 @@ export const ALWAYS_LOADED_TOOL_NAMES = new Set<string>([
 	DOMAIN_TOOL_IDS.NODES,
 	ORCHESTRATION_TOOL_IDS.VERIFY_BUILT_WORKFLOW,
 	DOMAIN_TOOL_IDS.RESEARCH,
+	// Paired with RESEARCH on purpose: the research tool tells the agent to prefer
+	// n8n's own docs for n8n questions, but deferring n8n-docs priced that route at
+	// search_tools + load_tool while web search stayed one call away — so the agent
+	// web-searched things the docs answer (INS-749).
+	DOMAIN_TOOL_IDS.N8N_DOCS,
+	DOMAIN_TOOL_IDS.AGENTS,
+	// Deferring this one defeats its purpose: it exists for the case where
+	// nothing is connected, which is exactly when `search_tools` has no MCP tool
+	// to surface and the agent concludes the integration is unavailable.
+	DOMAIN_TOOL_IDS.MCP_SERVERS,
+	DOMAIN_TOOL_IDS.CONVERSATION_HISTORY,
+	// The instance-context block hands the agent ids and tells it to expand them, so deferring
+	// this would price every expand at search_tools + load_tool. It is only registered when the
+	// reader is enabled, so an instance without the feature pays nothing for the entry.
+	DOMAIN_TOOL_IDS.ACTIVITY,
 	'web-search',
 	'fetch-url',
+	// build-agent is the primary route for agent-anchored intents; deferring it
+	// costs 2 LLM rounds (search_tools + load_tool) and a prompt-cache rewrite
+	// on every agent build.
+	...(isAgentFeatureEnabled() ? [ORCHESTRATION_TOOL_IDS.BUILD_AGENT] : []),
+	// Paired with build-agent: the model must be able to check supported agent
+	// channels/capabilities during intent recognition — before committing to a
+	// path — so an unsupported channel (e.g. WhatsApp) is explained rather than
+	// improvised as a workflow. Deferring it costs a search_tools + load_tool
+	// round-trip and lets the model fall back to workflow assumptions first.
+	...(isAgentFeatureEnabled() ? [ORCHESTRATION_TOOL_IDS.LIST_AGENT_CAPABILITIES] : []),
 ]);
 
 export const CHECKPOINT_FOLLOW_UP_TOOL_NAMES = new Set<string>([

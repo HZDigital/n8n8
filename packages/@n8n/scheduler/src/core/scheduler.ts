@@ -1,6 +1,7 @@
 import type { TaskHandler } from './executor';
 import type { MaterializerSummary } from './materializer';
 import type { ReapResult } from './reaper';
+import type { ReconciliationSummary } from './reconciliation';
 import type { RetentionSummary } from './retention';
 import type { ClaimedTask } from './types';
 
@@ -37,17 +38,23 @@ export interface Scheduler {
  */
 export interface SchedulerPasses {
 	/** One materializer pass: record upcoming occurrences of due jobs as tasks. */
-	materialize(): Promise<MaterializerSummary>;
+	materialize(signal?: AbortSignal): Promise<MaterializerSummary>;
 
 	/**
 	 * One executor tick: claim the due tasks this instance can run and schedule
 	 * each to fire at its `runAt`. Returns the claimed tasks.
 	 */
-	execute(): Promise<ClaimedTask[]>;
+	execute(signal?: AbortSignal): Promise<ClaimedTask[]>;
 
 	/** One reaper sweep: recover tasks stranded by an expired lease. */
-	reap(): Promise<ReapResult>;
+	reap(signal?: AbortSignal): Promise<ReapResult>;
 
 	/** One retention pass: delete finished tasks past their windows. */
-	prune(): Promise<RetentionSummary>;
+	prune(signal?: AbortSignal): Promise<RetentionSummary>;
+
+	/**
+	 * One owner reconciliation pass. Returns a no-op summary when the scheduler
+	 * was composed without reconciliation.
+	 */
+	reconcile(signal?: AbortSignal): Promise<ReconciliationSummary>;
 }

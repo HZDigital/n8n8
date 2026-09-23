@@ -6,6 +6,7 @@ import { mockedStore, waitAllPromises } from '@/__tests__/utils';
 import ExecutionsView from './ExecutionsView.vue';
 import { useWorkflowsListStore } from '@/app/stores/workflowsList.store';
 import { useProjectsStore } from '@/features/collaboration/projects/projects.store';
+import { useExecutionsStore } from '@/features/execution/executions/executions.store';
 import { VIEWS } from '@/app/constants';
 import type { Project } from '@/features/collaboration/projects/projects.types';
 import type { IWorkflowDb } from '@/Interface';
@@ -28,7 +29,9 @@ const renderComponent = createComponentRenderer(ExecutionsView, {
 		stubs: {
 			ProjectHeader: { template: '<div data-test-id="project-header-stub" />' },
 			GlobalExecutionsList: {
-				template: '<div data-test-id="global-executions-list-stub"><slot /></div>',
+				emits: ['execution:stop'],
+				template:
+					'<div data-test-id="global-executions-list-stub"><button data-test-id="stop-stub" @click="$emit(\'execution:stop\')" /><slot /></div>',
 			},
 			InsightsSummary: true,
 		},
@@ -66,14 +69,14 @@ describe('ExecutionsView', () => {
 		await waitAllPromises();
 	});
 
-	it('shows the workflows empty state when there are no workflows', async () => {
+	it('shows the executions empty state when there are no workflows', async () => {
 		workflowsListStore.hasFetchedAllWorkflows.mockReturnValue(true);
 
 		const { getByTestId, queryByTestId } = renderComponent();
 		await waitAllPromises();
 
 		const emptyState = getByTestId('empty-resources-list');
-		expect(within(emptyState).getByText('Create your first automation')).toBeVisible();
+		expect(within(emptyState).getByText('No executions yet')).toBeVisible();
 		expect(queryByTestId('global-executions-list-stub')).not.toBeInTheDocument();
 
 		await fireEvent.click(within(emptyState).getByRole('button', { name: 'Create workflow' }));
@@ -114,6 +117,19 @@ describe('ExecutionsView', () => {
 
 		expect(getByTestId('global-executions-list-stub')).toBeInTheDocument();
 		expect(queryByTestId('empty-resources-list')).not.toBeInTheDocument();
+	});
+
+	it('refreshes after a stop without dropping the loaded pages', async () => {
+		workflowsListStore.hasFetchedAllWorkflows.mockReturnValue(true);
+		workflowsListStore.allWorkflows = [{ id: 'w1' } as IWorkflowDb];
+		const executionsStore = mockedStore(useExecutionsStore);
+
+		const { getByTestId } = renderComponent();
+		await waitAllPromises();
+
+		await fireEvent.click(getByTestId('stop-stub'));
+
+		expect(executionsStore.refreshExecutions).toHaveBeenCalled();
 	});
 
 	it('checks workflow emptiness for the current project scope', async () => {
